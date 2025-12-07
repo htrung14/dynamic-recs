@@ -152,6 +152,27 @@ class TMDBClient:
             return response
         
         return None
+
+    async def get_popular(
+        self,
+        media_type: str,
+        page: int = 1
+    ) -> List[Dict[str, Any]]:
+        """Fetch popular items as a fallback when recommendations are empty."""
+        cache_key = f"popular:{media_type}:tmdb:page{page}"
+
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        endpoint = f"/{media_type}/popular"
+        response = await self._request(endpoint, {"page": page})
+
+        if response and "results" in response:
+            results = response["results"]
+            await self.cache.set(cache_key, results, ttl=settings.CACHE_TTL_RECOMMENDATIONS)
+            return results
+        return []
     
     async def find_by_imdb_id(self, imdb_id: str) -> Optional[Dict[str, Any]]:
         """

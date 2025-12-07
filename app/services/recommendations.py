@@ -307,8 +307,16 @@ class RecommendationEngine:
         recommendations = await self.fetch_recommendations_for_seeds(seeds)
         
         if not recommendations:
-            logger.warning("No recommendations fetched from TMDB")
-            return []
+            logger.warning("No recommendations fetched from TMDB, falling back to popular feed")
+            # Use TMDB popular as fallback to avoid empty catalogs
+            if media_type in {"movie", "series"}:
+                tmdb_type = "movie" if media_type == "movie" else "tv"
+                recommendations = await self.tmdb.get_popular(tmdb_type, page=1)
+            else:
+                # default to movies popular
+                recommendations = await self.tmdb.get_popular("movie", page=1)
+            if not recommendations:
+                return []
         
         # Ensure external_ids/imdb_id present for poster conversion and scoring
         recommendations = await self._attach_external_ids(recommendations)
