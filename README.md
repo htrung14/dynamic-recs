@@ -256,8 +256,10 @@ Follow Stremio's Love button guide (https://blog.stremio.com/stremio-like-and-lo
 1. In Stremio, install/enable the Like & Love buttons add-on (per the blog post).
 2. Open the Stremio web app and click the **Loved** tab (heart icon) added by the add-on.
 3. Copy the full loved link from the address bar. Examples:
-  - `https://loves.stremio-addon.com/?token=...`
-  - `stremio://likes.stremio.com/addons/loved/movies-shows/<TOKEN>/manifest.json`
+
+- `https://loves.stremio-addon.com/?token=...`
+- `stremio://likes.stremio.com/addons/loved/movies-shows/<TOKEN>/manifest.json`
+
 4. Paste the full link (or just the token) into the **Stremio Loved Token or URL** field on `/configure`.
 
 ### API Keys (Optional)

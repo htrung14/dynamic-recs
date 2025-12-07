@@ -58,6 +58,7 @@ async def get_manifest(
     # Add movie catalogs if enabled
     if config.include_movies:
         seeds_for_movies = loved_movies if loved_movies else recent_watches
+        use_loved_prefix = config.use_loved_items
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_movies):
@@ -66,15 +67,18 @@ async def get_manifest(
                     tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
                     if tmdb_data:
                         title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        prefix = "🎬 Because you loved" if loved_movies else "🎬 Because you watched"
-                        catalog_name = f"{prefix} {title}"
+                        prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Because you watched"
+                        catalog_name = f"{prefix} {title}" if title else f"{prefix}"
                     else:
-                        catalog_name = f"🎬 Recommended Movies #{i+1}"
+                        prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Recommended Movies"
+                        catalog_name = f"{prefix} #{i+1}"
                 except Exception as e:
                     logger.debug(f"Failed to get title for {imdb_id}: {e}")
-                    catalog_name = f"🎬 Recommended Movies #{i+1}"
+                    prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Recommended Movies"
+                    catalog_name = f"{prefix} #{i+1}"
             else:
-                catalog_name = f"🎬 Recommended Movies #{i+1}"
+                prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Recommended Movies"
+                catalog_name = f"{prefix} #{i+1}"
             
             catalogs.append(
                 ManifestCatalog(
@@ -87,6 +91,7 @@ async def get_manifest(
     # Add series catalogs if enabled
     if config.include_series:
         seeds_for_series = loved_series if loved_series else recent_watches
+        use_loved_prefix = config.use_loved_items
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_series):
@@ -95,15 +100,18 @@ async def get_manifest(
                     tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
                     if tmdb_data:
                         title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        prefix = "📺 Because you loved" if loved_series else "📺 Because you watched"
-                        catalog_name = f"{prefix} {title}"
+                        prefix = "📺 Because you loved" if use_loved_prefix else "📺 Because you watched"
+                        catalog_name = f"{prefix} {title}" if title else f"{prefix}"
                     else:
-                        catalog_name = f"📺 Recommended Series #{i+1}"
+                        prefix = "📺 Because you loved" if use_loved_prefix else "📺 Recommended Series"
+                        catalog_name = f"{prefix} #{i+1}"
                 except Exception as e:
                     logger.debug(f"Failed to get title for {imdb_id}: {e}")
-                    catalog_name = f"📺 Recommended Series #{i+1}"
+                    prefix = "📺 Because you loved" if use_loved_prefix else "📺 Recommended Series"
+                    catalog_name = f"{prefix} #{i+1}"
             else:
-                catalog_name = f"📺 Recommended Series #{i+1}"
+                prefix = "📺 Because you loved" if use_loved_prefix else "📺 Recommended Series"
+                catalog_name = f"{prefix} #{i+1}"
             
             catalogs.append(
                 ManifestCatalog(
