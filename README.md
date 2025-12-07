@@ -451,6 +451,17 @@ docker run -d \
 - **HTTPS Recommended**: Use reverse proxy (nginx/Caddy) for production
 - **Rate Limiting**: Respect API rate limits with caching
 
+**Important Security Guidelines:**
+
+- **Never commit `.env` files** - Contains sensitive API keys and tokens
+- **Never share your Stremio auth key** - Grants full access to your library
+- **Keep your TOKEN_SALT secret** - Used to sign configuration tokens
+- **Use environment variables** - Never hardcode credentials in code
+- **Rotate keys regularly** - Generate new API keys if exposed
+- **HTTPS in production** - Always use SSL/TLS for public deployments
+
+The `.env` file is already in `.gitignore` to prevent accidental commits.
+
 ## 📈 Performance Benchmarks
 
 Typical response times (with warm cache):

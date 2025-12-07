@@ -87,45 +87,38 @@ class StremioClient:
         Extract loved/favorited items from library
         
         Args:
-            library: Stremio library data
+            library: Stremio library data (format: {"result": [["id", timestamp], ...]})
             
         Returns:
             List of IMDB IDs
         """
-        if not library or "items" not in library:
+        if not library or "result" not in library:
             return []
         
-        loved_items = []
-        
-        for item in library["items"]:
-            if item.get("loved") or item.get("isFavorite"):
-                imdb_id = item.get("_id")
-                if imdb_id and imdb_id.startswith("tt"):
-                    loved_items.append(imdb_id)
-        
-        return loved_items
+        # Note: Stremio datastoreGet doesn't include "loved" info in simple format
+        # For now, return empty list. To get loved items, we'd need a different API call
+        # or use the full library metadata
+        return []
     
     def extract_watched_items(self, library: Optional[Dict[str, Any]]) -> List[str]:
         """
         Extract watched items from library
         
         Args:
-            library: Stremio library data
+            library: Stremio library data (format: {"result": [["id", timestamp], ...]})
             
         Returns:
             List of IMDB IDs
         """
-        if not library or "items" not in library:
+        if not library or "result" not in library:
             return []
         
         watched_items = []
         
-        for item in library["items"]:
-            state = item.get("state", {})
-            
-            if state.get("watched") or state.get("overall"):
-                imdb_id = item.get("_id")
-                if imdb_id and imdb_id.startswith("tt"):
+        for item in library["result"]:
+            if isinstance(item, list) and len(item) >= 1:
+                imdb_id = item[0]
+                if imdb_id and isinstance(imdb_id, str) and imdb_id.startswith("tt"):
                     watched_items.append(imdb_id)
         
         return watched_items
@@ -139,25 +132,24 @@ class StremioClient:
         Extract recently watched items sorted by timestamp
         
         Args:
-            library: Stremio library data
+            library: Stremio library data (format: {"result": [["id", timestamp], ...]})
             limit: Maximum number of items to return
             
         Returns:
             List of IMDB IDs sorted by recency
         """
-        if not library or "items" not in library:
+        if not library or "result" not in library:
             return []
         
         watched_with_time = []
         
-        for item in library["items"]:
-            state = item.get("state", {})
-            last_watched = state.get("lastWatched") or item.get("lastWatched")
-            
-            if last_watched:
-                imdb_id = item.get("_id")
-                if imdb_id and imdb_id.startswith("tt"):
-                    watched_with_time.append((imdb_id, last_watched))
+        for item in library["result"]:
+            if isinstance(item, list) and len(item) >= 2:
+                imdb_id = item[0]
+                timestamp = item[1]
+                
+                if imdb_id and isinstance(imdb_id, str) and imdb_id.startswith("tt"):
+                    watched_with_time.append((imdb_id, timestamp))
         
         # Sort by timestamp (most recent first)
         watched_with_time.sort(key=lambda x: x[1], reverse=True)

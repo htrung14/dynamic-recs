@@ -82,22 +82,22 @@ class TMDBClient:
     
     async def get_recommendations(
         self,
-        media_type: str,
         tmdb_id: int,
+        media_type: str,
         page: int = 1
     ) -> List[Dict[str, Any]]:
         """
         Get recommendations for a movie or series
         
         Args:
-            media_type: "movie" or "tv"
             tmdb_id: TMDB ID
+            media_type: "movie" or "tv"
             page: Page number
             
         Returns:
             List of recommendation items
         """
-        cache_key = f"rec:{tmdb_id}:{media_type}:tmdb:page{page}"
+        cache_key = f"rec:{media_type}:{tmdb_id}:tmdb:page{page}"
         
         # Check cache first
         cached = await self.cache.get(cache_key)

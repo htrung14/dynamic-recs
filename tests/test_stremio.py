@@ -9,11 +9,11 @@ def test_extract_loved_items(sample_stremio_library):
     """Test extraction of loved items from library"""
     client = StremioClient()
     
+    # Note: datastoreGet API doesn't include loved/favorite info
+    # This would require a different API endpoint
     loved = client.extract_loved_items(sample_stremio_library)
     
-    assert len(loved) == 2
-    assert "tt0137523" in loved  # Fight Club
-    assert "tt0903747" in loved  # Breaking Bad
+    assert len(loved) == 0  # Currently not supported
 
 
 def test_extract_loved_items_empty():
@@ -21,8 +21,8 @@ def test_extract_loved_items_empty():
     client = StremioClient()
     
     library = {
-        "items": [
-            {"_id": "tt1234567", "state": {"watched": True}}
+        "result": [
+            ["tt1234567", 1704484800000]
         ]
     }
     
@@ -36,10 +36,12 @@ def test_extract_watched_items(sample_stremio_library):
     
     watched = client.extract_watched_items(sample_stremio_library)
     
+    # Should extract only IMDB IDs (tt* format), not trakt IDs
     assert len(watched) == 3
     assert "tt0137523" in watched
     assert "tt0903747" in watched
     assert "tt0468569" in watched
+    assert "trakt:123456" not in watched
 
 
 def test_extract_recently_watched(sample_stremio_library):
@@ -48,11 +50,11 @@ def test_extract_recently_watched(sample_stremio_library):
     
     recent = client.extract_recently_watched(sample_stremio_library, limit=10)
     
-    # Should be ordered by lastWatched (most recent first)
+    # Should be ordered by timestamp (most recent first)
     assert len(recent) == 3
-    assert recent[0] == "tt0137523"  # 2024-01-15
-    assert recent[1] == "tt0903747"  # 2024-01-10
-    assert recent[2] == "tt0468569"  # 2024-01-05
+    assert recent[0] == "tt0137523"  # Highest timestamp
+    assert recent[1] == "tt0903747"  # Middle timestamp  
+    assert recent[2] == "tt0468569"  # Lowest timestamp
 
 
 def test_extract_recently_watched_with_limit(sample_stremio_library):
@@ -79,20 +81,18 @@ def test_extract_with_invalid_library():
 
 
 def test_extract_filters_non_imdb_ids():
-    """Test that only IMDB IDs (starting with tt) are extracted"""
+    """Test that non-IMDB IDs are filtered out"""
     client = StremioClient()
     
     library = {
-        "items": [
-            {"_id": "tt1234567", "loved": True},
-            {"_id": "tmdb:550", "loved": True},  # Should be filtered
-            {"_id": "tt9999999", "loved": True},
+        "result": [
+            ["tt1234567", 1704484800000],
+            ["trakt:12345", 1704484800000],
+            ["yt:abcdefg", 1704484800000]
         ]
     }
     
-    loved = client.extract_loved_items(library)
+    watched = client.extract_watched_items(library)
     
-    assert len(loved) == 2
-    assert "tt1234567" in loved
-    assert "tt9999999" in loved
-    assert "tmdb:550" not in loved
+    assert len(watched) == 1
+    assert watched[0] == "tt1234567"

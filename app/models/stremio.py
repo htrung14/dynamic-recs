@@ -29,7 +29,9 @@ class Manifest(BaseModel):
     
     behaviorHints: dict = {
         "configurable": False,
-        "configurationRequired": False
+        "configurationRequired": False,
+        "adult": False,
+        "p2p": False
     }
 
 

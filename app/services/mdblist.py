@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class MDBListClient:
     """Async client for MDBList API"""
     
-    BASE_URL = "https://api.mdblist.com/api/"
+    BASE_URL = "https://mdblist.com/api/"
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.MDBLIST_API_KEY
@@ -59,12 +59,12 @@ class MDBListClient:
         try:
             session = await self.get_session()
             
-            payload = {
+            params = {
                 "apikey": self.api_key,
                 "i": imdb_id
             }
             
-            async with session.post(self.BASE_URL, json=payload) as response:
+            async with session.get(self.BASE_URL, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
                     

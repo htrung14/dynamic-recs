@@ -72,37 +72,12 @@ def sample_tmdb_series():
 
 @pytest.fixture
 def sample_stremio_library():
-    """Sample Stremio library data"""
+    """Sample Stremio library data (actual API format)"""
     return {
-        "items": [
-            {
-                "_id": "tt0137523",
-                "name": "Fight Club",
-                "type": "movie",
-                "loved": True,
-                "state": {
-                    "watched": True,
-                    "lastWatched": "2024-01-15T10:30:00Z"
-                }
-            },
-            {
-                "_id": "tt0903747",
-                "name": "Breaking Bad",
-                "type": "series",
-                "loved": True,
-                "state": {
-                    "watched": True,
-                    "lastWatched": "2024-01-10T15:20:00Z"
-                }
-            },
-            {
-                "_id": "tt0468569",
-                "name": "The Dark Knight",
-                "type": "movie",
-                "state": {
-                    "watched": True,
-                    "lastWatched": "2024-01-05T20:00:00Z"
-                }
-            }
+        "result": [
+            ["tt0137523", 1705318200000],  # 2024-01-15 (most recent)
+            ["tt0903747", 1704895200000],  # 2024-01-10
+            ["tt0468569", 1704484800000],  # 2024-01-05 (oldest)
+            ["trakt:123456", 1704484800000]  # Non-IMDB ID (should be filtered)
         ]
     }
