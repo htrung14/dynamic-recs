@@ -41,21 +41,33 @@ async def get_manifest(
     except Exception as e:
         logger.warning(f"Failed to fetch library for manifest: {e}")
         recent_watches = []
+
+    # Loved items (for titles) if enabled
+    loved_movies = []
+    loved_series = []
+    if config.use_loved_items:
+        try:
+            loved_movies = await stremio.fetch_loved_catalog("movie", token=config.stremio_loved_token)
+            loved_series = await stremio.fetch_loved_catalog("series", token=config.stremio_loved_token)
+        except Exception as e:
+            logger.debug(f"Failed to fetch loved catalogs: {e}")
     
     # Build catalogs based on user configuration
     catalogs = []
     
     # Add movie catalogs if enabled
     if config.include_movies:
+        seeds_for_movies = loved_movies if loved_movies else recent_watches
         for i in range(config.num_rows):
             # Get title for this seed if available
-            if i < len(recent_watches):
-                imdb_id = recent_watches[i]
+            if i < len(seeds_for_movies):
+                imdb_id = seeds_for_movies[i]
                 try:
                     tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
                     if tmdb_data:
                         title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        catalog_name = f"🎬 Because you watched {title}"
+                        prefix = "🎬 Because you loved" if loved_movies else "🎬 Because you watched"
+                        catalog_name = f"{prefix} {title}"
                     else:
                         catalog_name = f"🎬 Recommended Movies #{i+1}"
                 except Exception as e:
@@ -74,15 +86,17 @@ async def get_manifest(
     
     # Add series catalogs if enabled
     if config.include_series:
+        seeds_for_series = loved_series if loved_series else recent_watches
         for i in range(config.num_rows):
             # Get title for this seed if available
-            if i < len(recent_watches):
-                imdb_id = recent_watches[i]
+            if i < len(seeds_for_series):
+                imdb_id = seeds_for_series[i]
                 try:
                     tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
                     if tmdb_data:
                         title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        catalog_name = f"📺 Because you watched {title}"
+                        prefix = "📺 Because you loved" if loved_series else "📺 Because you watched"
+                        catalog_name = f"{prefix} {title}"
                     else:
                         catalog_name = f"📺 Recommended Series #{i+1}"
                 except Exception as e:
