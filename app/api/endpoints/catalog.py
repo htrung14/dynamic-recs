@@ -110,9 +110,27 @@ async def get_catalog(
             row_items = recommendations[:items_per_row]
         
         for item in row_items:
-            meta = convert_to_meta_poster(item, type)
-            if meta.id:  # Only include items with valid IMDB ID
+            # Skip items without valid IMDB ID before conversion
+            external_ids = item.get("external_ids", {})
+            imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
+            if not imdb_id:
+                logger.debug(
+                    "Skipping item without IMDB ID: %s (tmdb_id=%s)",
+                    item.get("title") or item.get("name"),
+                    item.get("id")
+                )
+                continue
+            
+            try:
+                meta = convert_to_meta_poster(item, type)
                 metas.append(meta)
+            except Exception as e:
+                logger.warning(
+                    "Failed to convert item to MetaPoster: %s (tmdb_id=%s)",
+                    item.get("title") or item.get("name"),
+                    item.get("id"),
+                    exc_info=True
+                )
         
         logger.info(f"Catalog {id} returned {len(metas)} items")
         
