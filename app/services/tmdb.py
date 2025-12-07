@@ -5,53 +5,23 @@ Async client for The Movie Database API
 import aiohttp
 import asyncio
 import logging
-import time
 from typing import List, Dict, Optional, Any
 from app.core.config import settings
 from app.services.cache import CacheManager
+from app.utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
-
-
-class RateLimiter:
-    """Token bucket rate limiter"""
-    
-    def __init__(self, rate: int):
-        self.rate = rate  # requests per second
-        self.tokens = float(rate)
-        self.last_update = time.monotonic()
-        self.lock = asyncio.Lock()
-    
-    async def acquire(self):
-        """Acquire a token, waiting if necessary"""
-        async with self.lock:
-            now = time.monotonic()
-            elapsed = now - self.last_update
-            
-            # Add tokens based on time elapsed
-            self.tokens = min(self.rate, self.tokens + elapsed * self.rate)
-            self.last_update = now
-            
-            if self.tokens >= 1:
-                self.tokens -= 1
-            else:
-                # Wait until we have a token
-                wait_time = (1 - self.tokens) / self.rate
-                await asyncio.sleep(wait_time)
-                self.tokens = 0
-                self.last_update = time.monotonic()
-
 
 class TMDBClient:
     """Async client for TMDB API"""
     
     BASE_URL = "https://api.themoviedb.org/3"
+    _rate_limiter: Optional[RateLimiter] = None
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.TMDB_API_KEY
         self.cache = CacheManager()
         self.session: Optional[aiohttp.ClientSession] = None
-        self.rate_limiter = RateLimiter(settings.TMDB_RATE_LIMIT)
     
     async def get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""

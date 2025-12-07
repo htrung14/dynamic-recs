@@ -17,13 +17,13 @@ async def fake_redis():
 
 @pytest.fixture
 def sample_user_config():
-    """Sample user configuration"""
+    """Sample user configuration with realistic fake credentials"""
     from app.models.config import UserConfig
     
     return UserConfig(
-        stremio_auth_key="test_auth_key_123",
-        tmdb_api_key="test_tmdb_key",
-        mdblist_api_key="test_mdblist_key",
+        stremio_auth_key="SXFxRURKV2lNVXVjemtuaU1RYlZFaENXREhUTUVKeGY=",  # Base64-like (44 chars)
+        tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",  # Fake 32-char hex
+        mdblist_api_key="fake1234567890abcdefghijklmnop",  # Fake 30-char alphanumeric
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,

@@ -62,9 +62,9 @@ def test_token_tampering(sample_user_config):
 def test_config_serialization():
     """Test that all config fields are preserved"""
     config = UserConfig(
-        stremio_auth_key="test_auth",
-        tmdb_api_key="tmdb_key",
-        mdblist_api_key="mdb_key",
+        stremio_auth_key="VGVzdEF1dGhGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=",
+        tmdb_api_key="6a0c3dd4a6952d8e005a5ba1a9740032",
+        mdblist_api_key="testmdbfake123456789abc",
         num_rows=10,
         min_rating=7.5,
         use_loved_items=False,

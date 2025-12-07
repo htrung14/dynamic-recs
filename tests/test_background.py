@@ -11,9 +11,9 @@ from app.models.config import UserConfig
 def sample_config():
     """Sample user configuration for testing"""
     return UserConfig(
-        stremio_auth_key="test_auth_key_123",
-        tmdb_api_key="test_tmdb_key",
-        mdblist_api_key="test_mdblist_key",
+        stremio_auth_key="SXFxRURKV2lNVXVjemtuaU1RYlZFaENXREhUTUVKeGY=",
+        tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",
+        mdblist_api_key="fake1234567890abcdefghijklmnop",
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,
@@ -58,9 +58,9 @@ def test_register_multiple_configs():
     manager = BackgroundTaskManager()
     
     config1 = UserConfig(
-        stremio_auth_key="key1",
-        tmdb_api_key="tmdb1",
-        mdblist_api_key="mdb1",
+        stremio_auth_key="QXV0aEtleTFGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=",
+        tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",
+        mdblist_api_key="fake1234567890abcdefgh1",
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,
@@ -69,9 +69,9 @@ def test_register_multiple_configs():
     )
     
     config2 = UserConfig(
-        stremio_auth_key="key2",
-        tmdb_api_key="tmdb2",
-        mdblist_api_key="mdb2",
+        stremio_auth_key="QXV0aEtleTJGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=",
+        tmdb_api_key="8b2c5de6a8174d0c227b7da3a1860254",
+        mdblist_api_key="fake1234567890abcdefgh2",
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,
@@ -83,8 +83,8 @@ def test_register_multiple_configs():
     manager.register_config(config2)
     
     assert len(manager.active_configs) == 2
-    assert "key1" in manager.active_configs
-    assert "key2" in manager.active_configs
+    assert "QXV0aEtleTFGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=" in manager.active_configs
+    assert "QXV0aEtleTJGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=" in manager.active_configs
 
 
 @pytest.mark.asyncio

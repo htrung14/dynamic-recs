@@ -118,10 +118,10 @@ async def test_manifest_movies_only():
     """Test manifest with only movies enabled"""
     from app.models.config import UserConfig
     
-    config = UserConfig(
-        stremio_auth_key="test_key",
-        tmdb_api_key="test_tmdb_key",
-        mdblist_api_key="test_mdblist_key",
+    test_config = UserConfig(
+        stremio_auth_key="VGVzdEtleUZha2VTdHJlbWlvQXV0aEtleUJhc2U2NA==",
+        tmdb_api_key="7c1d4ee5a7063e9f116b6ca2a0850143",
+        mdblist_api_key="testfake123456789abcdef",
         num_rows=3,
         min_rating=6.0,
         use_loved_items=True,
@@ -130,7 +130,7 @@ async def test_manifest_movies_only():
     )
     
     app = create_app()
-    token = encode_config(config)
+    token = encode_config(test_config)
     
     async with AsyncClient(app=app, base_url="http://test") as client:
         response = await client.get(f"/{token}/manifest.json")
