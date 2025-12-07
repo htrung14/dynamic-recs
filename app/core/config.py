@@ -37,14 +37,14 @@ class Settings(BaseSettings):
     CACHE_WARM_INTERVAL_HOURS: int = 3  # Hours between cache warming cycles
     
     # Performance Limits
-    MAX_SEEDS: int = 10
-    MAX_RECOMMENDATIONS_PER_SEED: int = 20
+    MAX_SEEDS: int = 5  # Reduced from 10 to minimize API calls (5 seed items)
+    MAX_RECOMMENDATIONS_PER_SEED: int = 15  # Reduced from 20 to minimize API calls (15 recs/seed)
     MAX_CONCURRENT_API_CALLS: int = 10
     
     # API Rate Limits (requests per second)
     # Optimized for performance while staying within API limits
-    TMDB_RATE_LIMIT: int = 45  # TMDB allows 50/sec, use 45 (22ms overhead)
-    MDBLIST_RATE_LIMIT: int = 30  # MDBList no strict limit, use 30 for speed (33ms overhead)
+    TMDB_RATE_LIMIT: int = 50  # TMDB allows 50/sec, use 45 (22ms overhead)
+    MDBLIST_RATE_LIMIT: int = 5  # MDBList allows 100k/day (~1.16 req/s), use 5 for good perf
     STREMIO_RATE_LIMIT: int = 10  # Stremio is reliable, use 10 (100ms overhead)
     
     # Development

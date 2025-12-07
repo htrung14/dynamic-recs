@@ -115,27 +115,38 @@ class MDBListClient:
         Returns:
             Dictionary mapping IMDB IDs to rating data
         """
-        tasks = []
-        
-        for imdb_id in imdb_ids:
-            task = self.get_rating(imdb_id)
-            tasks.append((imdb_id, task))
-        
-        # Execute in parallel with concurrency limit
         results = {}
+        uncached_ids = []
         
-        for i in range(0, len(tasks), settings.MAX_CONCURRENT_API_CALLS):
-            batch = tasks[i:i + settings.MAX_CONCURRENT_API_CALLS]
-            batch_tasks = [task for _, task in batch]
-            batch_ids = [imdb_id for imdb_id, _ in batch]
+        # Check cache first for all IDs
+        for imdb_id in imdb_ids:
+            cache_key = f"meta:{imdb_id}:mdblist"
+            cached = await self.cache.get(cache_key)
+            if cached:
+                results[imdb_id] = cached
+            else:
+                uncached_ids.append(imdb_id)
+        
+        # Only fetch from API for uncached items
+        if uncached_ids:
+            tasks = []
+            for imdb_id in uncached_ids:
+                task = self.get_rating(imdb_id)
+                tasks.append((imdb_id, task))
             
-            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-            
-            for imdb_id, result in zip(batch_ids, batch_results):
-                if isinstance(result, dict):
-                    results[imdb_id] = result
-                else:
-                    results[imdb_id] = None
+            # Execute in parallel with concurrency limit
+            for i in range(0, len(tasks), settings.MAX_CONCURRENT_API_CALLS):
+                batch = tasks[i:i + settings.MAX_CONCURRENT_API_CALLS]
+                batch_tasks = [task for _, task in batch]
+                batch_ids = [imdb_id for imdb_id, _ in batch]
+                
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                
+                for imdb_id, result in zip(batch_ids, batch_results):
+                    if isinstance(result, dict):
+                        results[imdb_id] = result
+                    else:
+                        results[imdb_id] = None
         
         return results
     
