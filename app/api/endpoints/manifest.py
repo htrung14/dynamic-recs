@@ -23,8 +23,8 @@ async def get_manifest(
     
     The manifest defines what catalogs this addon provides
     """
-    # Add cache headers
-    response.headers["Cache-Control"] = "max-age=3600, public"  # 1 hour for dynamic names
+    # Add cache headers (avoid stale titles in Stremio)
+    response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Type"] = "application/json"
     # Decode and validate token
     config = decode_config(token)
