@@ -1,15 +1,44 @@
-"""
-MDBList API Client
+"""MDBList API Client
 Async client for MDBList ratings and metadata
 """
 import aiohttp
 import asyncio
 import logging
+import time
 from typing import List, Dict, Optional, Any
 from app.core.config import settings
 from app.services.cache import CacheManager
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimiter:
+    """Token bucket rate limiter"""
+    
+    def __init__(self, rate: int):
+        self.rate = rate  # requests per second
+        self.tokens = rate
+        self.last_update = time.monotonic()
+        self.lock = asyncio.Lock()
+    
+    async def acquire(self):
+        """Acquire a token, waiting if necessary"""
+        async with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.last_update
+            
+            # Add tokens based on time elapsed
+            self.tokens = min(self.rate, self.tokens + elapsed * self.rate)
+            self.last_update = now
+            
+            if self.tokens >= 1:
+                self.tokens -= 1
+            else:
+                # Wait until we have a token
+                wait_time = (1 - self.tokens) / self.rate
+                await asyncio.sleep(wait_time)
+                self.tokens = 0
+                self.last_update = time.monotonic()
 
 
 class MDBListClient:
@@ -21,6 +50,7 @@ class MDBListClient:
         self.api_key = api_key or settings.MDBLIST_API_KEY
         self.cache = CacheManager()
         self.session: Optional[aiohttp.ClientSession] = None
+        self.rate_limiter = RateLimiter(settings.MDBLIST_RATE_LIMIT)
     
     async def get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
@@ -56,6 +86,9 @@ class MDBListClient:
         if cached:
             return cached
         
+        # Apply rate limiting
+        await self.rate_limiter.acquire()
+        
         try:
             session = await self.get_session()
             
@@ -79,6 +112,9 @@ class MDBListClient:
                 elif response.status == 429:
                     logger.warning("MDBList rate limit exceeded")
                     await asyncio.sleep(2)
+                    return None
+                elif response.status == 503:
+                    logger.debug(f"MDBList temporarily unavailable (503)")
                     return None
                 else:
                     logger.error(f"MDBList API error: {response.status}")

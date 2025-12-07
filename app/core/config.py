@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     MAX_RECOMMENDATIONS_PER_SEED: int = 20
     MAX_CONCURRENT_API_CALLS: int = 10
     
+    # API Rate Limits (requests per second)
+    TMDB_RATE_LIMIT: int = 40  # TMDB allows 50/sec, use 40 to be safe
+    MDBLIST_RATE_LIMIT: int = 10  # Conservative limit
+    STREMIO_RATE_LIMIT: int = 5  # Conservative limit
+    
     # Development
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
