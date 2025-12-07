@@ -109,6 +109,9 @@ class TMDBClient:
         
         if response and "results" in response:
             results = response["results"]
+            # Ensure media_type is set for downstream filtering
+            for item in results:
+                item.setdefault("media_type", media_type)
             await self.cache.set(
                 cache_key,
                 results,
@@ -170,6 +173,9 @@ class TMDBClient:
 
         if response and "results" in response:
             results = response["results"]
+            # Ensure media_type is set for downstream filtering
+            for item in results:
+                item.setdefault("media_type", media_type)
             await self.cache.set(cache_key, results, ttl=settings.CACHE_TTL_RECOMMENDATIONS)
             return results
         return []
