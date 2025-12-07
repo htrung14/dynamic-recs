@@ -42,13 +42,15 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_API_CALLS: int = 10
     
     # API Rate Limits (requests per second)
-    TMDB_RATE_LIMIT: int = 40  # TMDB allows 50/sec, use 40 to be safe
-    MDBLIST_RATE_LIMIT: int = 10  # Conservative limit
-    STREMIO_RATE_LIMIT: int = 5  # Conservative limit
+    # Optimized for performance while staying within API limits
+    TMDB_RATE_LIMIT: int = 45  # TMDB allows 50/sec, use 45 (22ms overhead)
+    MDBLIST_RATE_LIMIT: int = 30  # MDBList no strict limit, use 30 for speed (33ms overhead)
+    STREMIO_RATE_LIMIT: int = 10  # Stremio is reliable, use 10 (100ms overhead)
     
     # Development
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
+    DISABLE_RATE_LIMITING: bool = False  # Set to True to disable rate limiting for local dev
 
 
 settings = Settings()

@@ -30,6 +30,12 @@ class RateLimiter:
     
     async def acquire(self):
         """Acquire a token, waiting if necessary"""
+        from app.core.config import settings
+        
+        # Skip rate limiting if disabled for development
+        if settings.DISABLE_RATE_LIMITING:
+            return
+        
         async with self.lock:
             now = time.monotonic()
             elapsed = now - self.last_update
