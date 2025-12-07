@@ -6,6 +6,7 @@ A high-performance, self-hosted Stremio addon that generates personalized movie 
 
 - **🎯 Personalized Recommendations**: Uses your Stremio watch history and loved items as seeds
 - **⚡ Lightning Fast**: Sub-200ms response times with Redis caching
+- **🔄 Background Cache Warming**: Automatically refreshes recommendations every 3 hours for instant catalog loading
 - **🔐 Privacy-First**: No server-side user database - configuration stored in URL
 - **🎨 Dynamic Catalogs**: User-configurable number of recommendation rows
 - **⭐ Smart Filtering**: Integrates TMDB and MDBList ratings with customizable minimum threshold
@@ -309,12 +310,14 @@ python main.py
 
 1. **Token Management**: Secure encoding/decoding of user configuration in URLs
 2. **Cache Layer**: Redis-based caching with configurable TTLs
-3. **API Clients**: Async HTTP clients for TMDB, MDBList, and Stremio APIs
-4. **Recommendation Engine**: Intelligent scoring and ranking algorithm
-5. **FastAPI Server**: High-performance async web server
+3. **Background Tasks**: Automated cache warming for instant catalog loading
+4. **API Clients**: Async HTTP clients for TMDB, MDBList, and Stremio APIs
+5. **Recommendation Engine**: Intelligent scoring and ranking algorithm
+6. **FastAPI Server**: High-performance async web server
 
 ### Performance Optimizations
 
+- **Background Cache Warming**: Automatically pre-fetches recommendations every 3 hours
 - **Parallel API Calls**: Concurrent requests with configurable limits
 - **Smart Caching**: Multi-level caching strategy
   - Library data: 6 hours
@@ -436,13 +439,16 @@ docker run -d \
 
 ### Environment Variables
 
-| Variable          | Description              | Required |
-| ----------------- | ------------------------ | -------- |
-| `TOKEN_SALT`      | Secret for token signing | Yes      |
-| `BASE_URL`        | Public URL of addon      | Yes      |
-| `REDIS_URL`       | Redis connection URL     | Yes      |
-| `TMDB_API_KEY`    | TMDB API key             | No       |
-| `MDBLIST_API_KEY` | MDBList API key          | No       |
+| Variable                     | Description                       | Default | Required |
+| ---------------------------- | --------------------------------- | ------- | -------- |
+| `TOKEN_SALT`                 | Secret for token signing          | -       | Yes      |
+| `BASE_URL`                   | Public URL of addon               | -       | Yes      |
+| `REDIS_URL`                  | Redis connection URL              | -       | Yes      |
+| `TMDB_API_KEY`               | TMDB API key                      | -       | No       |
+| `MDBLIST_API_KEY`            | MDBList API key                   | -       | No       |
+| `CACHE_WARM_INTERVAL_HOURS`  | Hours between cache warming cycles| 3       | No       |
+| `DEBUG`                      | Enable debug mode                 | False   | No       |
+| `LOG_LEVEL`                  | Logging level                     | INFO    | No       |
 
 ## 🔒 Security
 

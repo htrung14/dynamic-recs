@@ -5,7 +5,9 @@ Returns recommendation catalogs
 from fastapi import APIRouter, HTTPException, Path
 from app.models.stremio import CatalogResponse, MetaPoster
 from app.services.recommendations import RecommendationEngine
+from app.services.background import get_task_manager
 from app.utils.token import decode_config
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -86,11 +88,18 @@ async def get_catalog(
         raise HTTPException(status_code=404, detail="Catalog not found")
     
     try:
+        # Register config for background cache warming
+        task_manager = get_task_manager()
+        task_manager.register_config(config)
+        
         # Initialize recommendation engine
         engine = RecommendationEngine(config)
         
         # Generate recommendations
         recommendations = await engine.generate_recommendations(media_type=type)
+        
+        # Schedule background cache warming for this config (non-blocking)
+        asyncio.create_task(task_manager.warm_cache_for_config(config))
         
         # Close engine connections
         await engine.close()

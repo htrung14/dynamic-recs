@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.endpoints import manifest, catalog, configure, health
 from app.core.config import settings
+from app.services.background import get_task_manager
 import logging
 
 # Configure logging
@@ -25,9 +26,20 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Dynamic Recommendations Addon")
     logger.info(f"Base URL: {settings.BASE_URL}")
+    
+    # Start background cache warming
+    task_manager = get_task_manager()
+    task_manager.start(interval_hours=settings.CACHE_WARM_INTERVAL_HOURS)
+    logger.info(f"Background cache warming enabled (interval: {settings.CACHE_WARM_INTERVAL_HOURS}h)")
+    
     yield
+    
     # Shutdown
     logger.info("Shutting down Dynamic Recommendations Addon")
+    
+    # Stop background tasks
+    task_manager = get_task_manager()
+    await task_manager.stop()
 
 
 def create_app() -> FastAPI:

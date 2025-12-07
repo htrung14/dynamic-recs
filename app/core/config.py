@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     CACHE_TTL_RATINGS: int = 604800  # 7 days
     CACHE_TTL_CATALOG: int = 3600  # 1 hour
     
+    # Background Tasks
+    CACHE_WARM_INTERVAL_HOURS: int = 3  # Hours between cache warming cycles
+    
     # Performance Limits
     MAX_SEEDS: int = 10
     MAX_RECOMMENDATIONS_PER_SEED: int = 20
