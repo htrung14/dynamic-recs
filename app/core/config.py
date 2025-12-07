@@ -2,8 +2,7 @@
 Configuration Management
 Loads and validates environment variables
 """
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import secrets
 
@@ -11,11 +10,10 @@ import secrets
 class Settings(BaseSettings):
     """Application settings from environment variables"""
     
-    model_config = ConfigDict(
+    model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
     )
-    
     # Required
     TOKEN_SALT: str = secrets.token_hex(32)
     BASE_URL: str = "http://localhost:8000"
@@ -44,7 +42,7 @@ class Settings(BaseSettings):
     # API Rate Limits (requests per second)
     # Optimized for performance while staying within API limits
     TMDB_RATE_LIMIT: int = 50  # TMDB allows 50/sec, use 45 (22ms overhead)
-    MDBLIST_RATE_LIMIT: int = 5  # MDBList allows 100k/day (~1.16 req/s), use 5 for good perf
+    MDBLIST_RATE_LIMIT: int = 50  # MDBList allows 100k/day (~1.16 req/s), use 5 for good perf
     STREMIO_RATE_LIMIT: int = 10  # Stremio is reliable, use 10 (100ms overhead)
     
     # Development
