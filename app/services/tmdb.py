@@ -279,3 +279,59 @@ class TMDBClient:
                     results.extend(result[:max_per_item])
         
         return results
+    
+    async def batch_details(
+        self,
+        items: List[Dict[str, Any]]
+    ) -> Dict[int, Optional[Dict[str, Any]]]:
+        """
+        Get details for multiple items in parallel, checking cache first
+        
+        Args:
+            items: List of items with 'id' and 'media_type'
+            
+        Returns:
+            Dictionary mapping TMDB IDs to detail data
+        """
+        results = {}
+        uncached_items = []
+        
+        # Check cache for all items first
+        for item in items:
+            tmdb_id = item.get("id")
+            media_type = item.get("media_type", "movie")
+            
+            if not tmdb_id:
+                continue
+            
+            cache_key = f"meta:{tmdb_id}:{media_type}:tmdb"
+            cached = await self.cache.get(cache_key)
+            
+            if cached:
+                results[tmdb_id] = cached
+            else:
+                uncached_items.append((tmdb_id, media_type))
+        
+        # Only fetch uncached items from API
+        if uncached_items:
+            tasks = []
+            for tmdb_id, media_type in uncached_items:
+                task = self.get_details(media_type, tmdb_id)
+                tasks.append((tmdb_id, task))
+            
+            # Execute in parallel with concurrency limit
+            for i in range(0, len(tasks), settings.MAX_CONCURRENT_API_CALLS):
+                batch = tasks[i:i + settings.MAX_CONCURRENT_API_CALLS]
+                batch_tasks = [task for _, task in batch]
+                batch_ids = [tmdb_id for tmdb_id, _ in batch]
+                
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                
+                for tmdb_id, result in zip(batch_ids, batch_results):
+                    if isinstance(result, dict):
+                        results[tmdb_id] = result
+                    else:
+                        results[tmdb_id] = None
+        
+        return results
+

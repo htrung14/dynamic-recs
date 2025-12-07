@@ -127,43 +127,60 @@ class RecommendationEngine:
     async def _attach_external_ids(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ensure each TMDB item has external_ids/imdb_id by fetching details when missing."""
         enriched_items = []
-        sem = asyncio.Semaphore(settings.MAX_CONCURRENT_API_CALLS)
-
-        async def enrich_item(item: Dict[str, Any]) -> Dict[str, Any]:
-            # If imdb_id already present, keep as-is
+        items_needing_enrichment = []
+        
+        # Check cache for enriched items first
+        for item in items:
+            tmdb_id = item.get("id")
+            media_type = item.get("media_type", "movie")
+            
+            # Check if already has IMDB ID
             external_ids = item.get("external_ids", {})
             imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
             if imdb_id:
-                return item
-
-            tmdb_id = item.get("id") or item.get("tmdb_id")
-            media_type = item.get("media_type", "movie")
-            if not tmdb_id:
-                return item
-
-            async with sem:
-                details = await self.tmdb.get_details(media_type, tmdb_id)
-            if details:
-                # Merge missing fields
-                item.setdefault("external_ids", details.get("external_ids", {}))
-                if not item.get("poster_path"):
-                    item["poster_path"] = details.get("poster_path")
-                if not item.get("backdrop_path"):
-                    item["backdrop_path"] = details.get("backdrop_path")
-                if not item.get("overview"):
-                    item["overview"] = details.get("overview")
-                if not item.get("release_date"):
-                    item["release_date"] = details.get("release_date")
-                if not item.get("first_air_date"):
-                    item["first_air_date"] = details.get("first_air_date")
-                item["imdb_id"] = item.get("external_ids", {}).get("imdb_id")
-            return item
-
-        tasks = [enrich_item(item) for item in items]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in results:
-            if isinstance(res, dict):
-                enriched_items.append(res)
+                enriched_items.append(item)
+                continue
+            
+            # Check enrichment cache
+            if tmdb_id:
+                cache_key = f"enriched:{tmdb_id}:{media_type}"
+                cached = await self.cache.get(cache_key)
+                if cached:
+                    enriched_items.append(cached)
+                    continue
+            
+            items_needing_enrichment.append(item)
+        
+        # Batch fetch details for items without IMDB IDs
+        if items_needing_enrichment:
+            details_map = await self.tmdb.batch_details(items_needing_enrichment)
+            
+            for item in items_needing_enrichment:
+                tmdb_id = item.get("id")
+                media_type = item.get("media_type", "movie")
+                
+                if tmdb_id in details_map:
+                    details = details_map[tmdb_id]
+                    if details:
+                        # Merge missing fields
+                        item.setdefault("external_ids", details.get("external_ids", {}))
+                        if not item.get("poster_path"):
+                            item["poster_path"] = details.get("poster_path")
+                        if not item.get("backdrop_path"):
+                            item["backdrop_path"] = details.get("backdrop_path")
+                        if not item.get("overview"):
+                            item["overview"] = details.get("overview")
+                        if not item.get("release_date"):
+                            item["release_date"] = details.get("release_date")
+                        if not item.get("first_air_date"):
+                            item["first_air_date"] = details.get("first_air_date")
+                        item["imdb_id"] = item.get("external_ids", {}).get("imdb_id")
+                
+                # Cache enriched item
+                cache_key = f"enriched:{tmdb_id}:{media_type}"
+                await self.cache.set(cache_key, item, ttl=settings.CACHE_TTL_RECOMMENDATIONS)
+                enriched_items.append(item)
+        
         return enriched_items
     
     async def enrich_with_ratings(
