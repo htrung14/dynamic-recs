@@ -120,6 +120,7 @@ async def test_manifest_movies_only():
     
     test_config = UserConfig(
         stremio_auth_key="VGVzdEtleUZha2VTdHJlbWlvQXV0aEtleUJhc2U2NA==",
+        stremio_loved_token="test_loved_token",
         tmdb_api_key="7c1d4ee5a7063e9f116b6ca2a0850143",
         mdblist_api_key="testfake123456789abcdef",
         num_rows=3,

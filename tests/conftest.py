@@ -22,6 +22,7 @@ def sample_user_config():
     
     return UserConfig(
         stremio_auth_key="SXFxRURKV2lNVXVjemtuaU1RYlZFaENXREhUTUVKeGY=",  # Base64-like (44 chars)
+        stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",  # Fake 32-char hex
         mdblist_api_key="fake1234567890abcdefghijklmnop",  # Fake 30-char alphanumeric
         num_rows=5,
