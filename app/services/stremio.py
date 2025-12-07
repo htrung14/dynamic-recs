@@ -10,18 +10,20 @@ from app.core.config import settings
 from app.services.cache import CacheManager
 from app.utils.rate_limiter import RateLimiter
 
-logger = logging.getLogger(__name__)\
+logger = logging.getLogger(__name__)
 
 
 class StremioClient:
     """Async client for Stremio API"""
     
     API_URL = "https://api.strem.io/api/datastoreGet"
+    LOVED_BASE_URL = "https://likes.stremio.com"
     _rate_limiter: Optional[RateLimiter] = None
     
     def __init__(self):
         self.cache = CacheManager()
         self.session: Optional[aiohttp.ClientSession] = None
+        self.loved_base_url = self.LOVED_BASE_URL
     
     async def get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
@@ -50,6 +52,7 @@ class StremioClient:
         
         # Check cache first
         cached = await self.cache.get(cache_key)
+        self.loved_base_url = "https://likes.stremio.com"
         if cached:
             return cached
         
@@ -106,9 +109,51 @@ class StremioClient:
             return []
         
         # Note: Stremio datastoreGet doesn't include "loved" info in simple format
-        # For now, return empty list. To get loved items, we'd need a different API call
-        # or use the full library metadata
         return []
+    async def fetch_loved_catalog(self, media_type: str, token: Optional[str] = None) -> List[str]:
+        """Fetch loved items using the official Stremio loved addon.
+
+        Args:
+            media_type: "movie" or "series"
+        Returns:
+            List of IMDB IDs (tt- prefixed)
+        """
+        token = token or settings.STREMIO_LOVED_TOKEN
+        if not token:
+            return []
+
+        # catalog ids from manifest
+        catalog_id = "stremio-loved-movie" if media_type == "movie" else "stremio-loved-series"
+        url = (
+            f"{self.loved_base_url}/addons/loved/movies-shows/{token}/"
+            f"catalog/{media_type}/{catalog_id}.json"
+        )
+
+        cache_key = f"loved:{media_type}:{token}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"Loved catalog fetch returned {resp.status} for {media_type}")
+                        return []
+                    data = await resp.json()
+                    metas = data.get("metas", [])
+                    imdb_ids = []
+                    for m in metas:
+                        imdb_id = m.get("imdb_id") or m.get("id")
+                        if imdb_id and str(imdb_id).startswith("tt"):
+                            imdb_ids.append(imdb_id)
+
+                    if imdb_ids:
+                        await self.cache.set(cache_key, imdb_ids, ttl=settings.CACHE_TTL_LIBRARY)
+                    return imdb_ids
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Loved catalog fetch failed: {exc}")
+            return []
     
     def extract_watched_items(self, library: Optional[Dict[str, Any]]) -> List[str]:
         """

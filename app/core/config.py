@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # API Keys (server defaults - users must provide if not set)
     TMDB_API_KEY: Optional[str] = None
     MDBLIST_API_KEY: Optional[str] = None
+    STREMIO_LOVED_TOKEN: Optional[str] = None  # Token for official Stremio loved addon (optional)
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

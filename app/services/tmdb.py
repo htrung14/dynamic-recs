@@ -141,6 +141,31 @@ class TMDBClient:
             return results
         
         return []
+
+    async def get_similar(
+        self,
+        tmdb_id: int,
+        media_type: str,
+        page: int = 1
+    ) -> List[Dict[str, Any]]:
+        """Get similar items when recommendations are missing or sparse."""
+        cache_key = f"similar:{media_type}:{tmdb_id}:tmdb:page{page}"
+
+        cached = await self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        endpoint = f"/{media_type}/{tmdb_id}/similar"
+        response = await self._request(endpoint, {"page": page})
+
+        if response and "results" in response:
+            results = response["results"]
+            for item in results:
+                item.setdefault("media_type", media_type)
+            await self.cache.set(cache_key, results, ttl=settings.CACHE_TTL_RECOMMENDATIONS)
+            return results
+
+        return []
     
     async def get_details(
         self,
@@ -278,6 +303,32 @@ class TMDBClient:
                 if isinstance(result, list):
                     results.extend(result[:max_per_item])
         
+        return results
+
+    async def batch_similar(
+        self,
+        items: List[Dict[str, Any]],
+        max_per_item: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Get similar items for multiple titles as a secondary signal."""
+        tasks = []
+
+        for item in items[:settings.MAX_SEEDS]:
+            tmdb_id = item.get("tmdb_id")
+            media_type = item.get("media_type", "movie")
+
+            if tmdb_id:
+                tasks.append(self.get_similar(tmdb_id, media_type, page=1))
+
+        results = []
+        for i in range(0, len(tasks), settings.MAX_CONCURRENT_API_CALLS):
+            batch = tasks[i:i + settings.MAX_CONCURRENT_API_CALLS]
+            batch_results = await asyncio.gather(*batch, return_exceptions=True)
+
+            for result in batch_results:
+                if isinstance(result, list):
+                    results.extend(result[:max_per_item])
+
         return results
     
     async def batch_details(

@@ -5,6 +5,7 @@ Serves the configuration UI and generates signed tokens
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from typing import Optional
 from app.core.config import settings
 from app.models.config import UserConfig
 from app.utils.token import encode_config
@@ -22,6 +23,7 @@ class ConfigRequest(BaseModel):
     use_loved_items: bool = True
     include_movies: bool = True
     include_series: bool = True
+    stremio_loved_token: Optional[str] = None
 
 
 @router.post("/generate-token")
@@ -40,7 +42,8 @@ async def generate_token(request: ConfigRequest):
             min_rating=request.min_rating,
             use_loved_items=request.use_loved_items,
             include_movies=request.include_movies,
-            include_series=request.include_series
+            include_series=request.include_series,
+            stremio_loved_token=request.stremio_loved_token or settings.STREMIO_LOVED_TOKEN,
         )
         
         # Generate signed token
@@ -68,6 +71,7 @@ async def configure_page():
     # Get server defaults for API keys
     tmdb_default = settings.TMDB_API_KEY or ""
     mdblist_default = settings.MDBLIST_API_KEY or ""
+    stremio_loved_default = settings.STREMIO_LOVED_TOKEN or ""
     
     html_content = """
 <!DOCTYPE html>
@@ -235,10 +239,15 @@ async def configure_page():
             </div>
             
             <div class="form-group">
-                <label for="mdblist_key">MDBList API Key *</label>
-                <input type="text" id="mdblist_key" required
-                       placeholder="Your MDBList API key" value="__MDBLIST_DEFAULT__">
-                <div class="helper-text">Required - Get one at mdblist.com/api</div>
+                  <label for="mdblist_key">MDBList API Key *</label>
+                  <input type="text" id="mdblist_key" required
+                      placeholder="Your MDBList API key" value="__MDBLIST_DEFAULT__">
+                  <div class="helper-text">Required - Get one at mdblist.com/api</div>
+
+                  <label for="stremio_loved_token">Stremio Loved Token (optional)</label>
+                  <input type="text" id="stremio_loved_token"
+                      placeholder="Token from loves addon" value="__STREMIO_LOVED_DEFAULT__">
+                  <div class="helper-text">Optional: Paste the token from your Stremio loved addon URL. Uses server default if empty.</div>
             </div>
             
             <div class="form-group">
@@ -302,6 +311,7 @@ async def configure_page():
                 stremio_auth_key: document.getElementById('stremio_auth').value.trim(),
                 tmdb_api_key: document.getElementById('tmdb_key').value.trim(),
                 mdblist_api_key: document.getElementById('mdblist_key').value.trim(),
+                stremio_loved_token: document.getElementById('stremio_loved_token').value.trim(),
                 num_rows: parseInt(document.getElementById('num_rows').value),
                 min_rating: parseFloat(document.getElementById('min_rating').value),
                 use_loved_items: document.getElementById('use_loved').checked,
@@ -378,5 +388,6 @@ async def configure_page():
     # Replace placeholders with actual values
     html_content = html_content.replace("__TMDB_DEFAULT__", tmdb_default)
     html_content = html_content.replace("__MDBLIST_DEFAULT__", mdblist_default)
+    html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", stremio_loved_default)
     
     return html_content
