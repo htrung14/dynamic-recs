@@ -73,7 +73,7 @@ docker-compose up -d
 3. Go to Console tab
 4. Run this command (it will automatically copy to clipboard):
    ```javascript
-   copy(localStorage.getItem('authKey'))
+   copy(localStorage.getItem("authKey"));
    ```
 5. Paste the value into the configuration page
 
