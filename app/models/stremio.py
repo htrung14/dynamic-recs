@@ -28,8 +28,8 @@ class Manifest(BaseModel):
     catalogs: List[ManifestCatalog]
     
     behaviorHints: dict = {
-        "configurable": True,
-        "configurationRequired": True
+        "configurable": False,
+        "configurationRequired": False
     }
 
 
