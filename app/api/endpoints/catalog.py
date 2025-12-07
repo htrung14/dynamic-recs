@@ -2,7 +2,7 @@
 Catalog Endpoint
 Returns recommendation catalogs
 """
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Response
 from app.models.stremio import CatalogResponse, MetaPoster
 from app.services.recommendations import RecommendationEngine
 from app.services.background import get_task_manager
@@ -62,6 +62,7 @@ def convert_to_meta_poster(item: dict, media_type: str) -> MetaPoster:
 
 @router.get("/{token}/catalog/{type}/{id}.json")
 async def get_catalog(
+    response: Response,
     token: str = Path(..., description="User configuration token"),
     type: str = Path(..., description="Content type: movie or series"),
     id: str = Path(..., description="Catalog ID")
@@ -70,10 +71,14 @@ async def get_catalog(
     Return catalog with recommendations
     
     Args:
+        response: FastAPI Response object for headers
         token: User configuration token
         type: "movie" or "series"
         id: Catalog identifier (e.g., "dynamic_movies_0")
     """
+    # Add cache control headers to prevent Stremio from caching empty responses
+    response.headers["Cache-Control"] = "max-age=3600, public"
+    response.headers["Content-Type"] = "application/json"
     # Decode and validate token
     config = decode_config(token)
     if not config:
@@ -143,8 +148,8 @@ async def get_catalog(
         
         logger.info(f"Catalog {id} returned {len(metas)} items")
         
-        response = CatalogResponse(metas=metas)
-        return response.model_dump()
+        catalog_response = CatalogResponse(metas=metas)
+        return catalog_response.model_dump()
         
     except Exception as e:
         logger.error(f"Error generating catalog: {e}", exc_info=True)

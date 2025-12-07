@@ -2,7 +2,7 @@
 Manifest Endpoint
 Returns the Stremio addon manifest with dynamic catalogs
 """
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Response
 from app.models.stremio import Manifest, ManifestCatalog
 from app.utils.token import decode_config
 import logging
@@ -12,12 +12,18 @@ router = APIRouter()
 
 
 @router.get("/{token}/manifest.json")
-async def get_manifest(token: str = Path(..., description="User configuration token")):
+async def get_manifest(
+    response: Response,
+    token: str = Path(..., description="User configuration token")
+):
     """
     Return addon manifest with user-specific configuration
     
     The manifest defines what catalogs this addon provides
     """
+    # Add cache headers
+    response.headers["Cache-Control"] = "max-age=86400, public"  # 24 hours
+    response.headers["Content-Type"] = "application/json"
     # Decode and validate token
     config = decode_config(token)
     if not config:
