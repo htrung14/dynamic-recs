@@ -179,9 +179,11 @@ class TMDBClient:
             if response.get("movie_results"):
                 result = response["movie_results"][0]
                 result["media_type"] = "movie"
+                result["tmdb_id"] = result["id"]  # Add tmdb_id field for compatibility
             elif response.get("tv_results"):
                 result = response["tv_results"][0]
                 result["media_type"] = "tv"
+                result["tmdb_id"] = result["id"]  # Add tmdb_id field for compatibility
             
             if result:
                 await self.cache.set(
@@ -215,7 +217,7 @@ class TMDBClient:
             media_type = item.get("media_type", "movie")
             
             if tmdb_id:
-                task = self.get_recommendations(media_type, tmdb_id, page=1)
+                task = self.get_recommendations(tmdb_id, media_type, page=1)
                 tasks.append(task)
         
         # Execute in parallel with concurrency limit

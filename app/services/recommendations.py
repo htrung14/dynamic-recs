@@ -123,6 +123,48 @@ class RecommendationEngine:
         )
         
         return recommendations
+
+    async def _attach_external_ids(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure each TMDB item has external_ids/imdb_id by fetching details when missing."""
+        enriched_items = []
+        sem = asyncio.Semaphore(settings.MAX_CONCURRENT_API_CALLS)
+
+        async def enrich_item(item: Dict[str, Any]) -> Dict[str, Any]:
+            # If imdb_id already present, keep as-is
+            external_ids = item.get("external_ids", {})
+            imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
+            if imdb_id:
+                return item
+
+            tmdb_id = item.get("id") or item.get("tmdb_id")
+            media_type = item.get("media_type", "movie")
+            if not tmdb_id:
+                return item
+
+            async with sem:
+                details = await self.tmdb.get_details(media_type, tmdb_id)
+            if details:
+                # Merge missing fields
+                item.setdefault("external_ids", details.get("external_ids", {}))
+                if not item.get("poster_path"):
+                    item["poster_path"] = details.get("poster_path")
+                if not item.get("backdrop_path"):
+                    item["backdrop_path"] = details.get("backdrop_path")
+                if not item.get("overview"):
+                    item["overview"] = details.get("overview")
+                if not item.get("release_date"):
+                    item["release_date"] = details.get("release_date")
+                if not item.get("first_air_date"):
+                    item["first_air_date"] = details.get("first_air_date")
+                item["imdb_id"] = item.get("external_ids", {}).get("imdb_id")
+            return item
+
+        tasks = [enrich_item(item) for item in items]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, dict):
+                enriched_items.append(res)
+        return enriched_items
     
     async def enrich_with_ratings(
         self,
@@ -268,6 +310,9 @@ class RecommendationEngine:
             logger.warning("No recommendations fetched from TMDB")
             return []
         
+        # Ensure external_ids/imdb_id present for poster conversion and scoring
+        recommendations = await self._attach_external_ids(recommendations)
+
         # Enrich with ratings
         enriched = await self.enrich_with_ratings(recommendations)
         
