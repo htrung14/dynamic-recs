@@ -52,11 +52,17 @@ def main():
     
     include_series = input("8. Include series? (Y/n): ").strip().lower()
     include_series = include_series != 'n'
+
+    default_loved = settings.STREMIO_LOVED_TOKEN or ""
+    loved_token = input("9. Stremio loved token (optional): ").strip()
+    if not loved_token and default_loved:
+        loved_token = default_loved
     
     # Create configuration
     try:
         config = UserConfig(
             stremio_auth_key=stremio_auth,
+            stremio_loved_token=loved_token or None,
             tmdb_api_key=tmdb_key,
             mdblist_api_key=mdblist_key,
             num_rows=num_rows,
