@@ -1,0 +1,18 @@
+"""
+User Configuration Models
+Pydantic models for user-specific configuration
+"""
+from pydantic import BaseModel, Field
+from typing import Optional
+
+
+class UserConfig(BaseModel):
+    """User configuration embedded in addon URL"""
+    stremio_auth_key: str = Field(..., description="Stremio authentication key")
+    tmdb_api_key: str = Field(..., description="TMDB API key (required)")
+    mdblist_api_key: str = Field(..., description="MDBList API key (required)")
+    num_rows: int = Field(5, ge=1, le=20, description="Number of recommendation rows")
+    min_rating: float = Field(6.0, ge=0.0, le=10.0, description="Minimum rating filter")
+    use_loved_items: bool = Field(True, description="Prioritize loved items over watch history")
+    include_movies: bool = Field(True, description="Include movie recommendations")
+    include_series: bool = Field(True, description="Include series recommendations")

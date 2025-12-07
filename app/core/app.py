@@ -1,0 +1,62 @@
+"""
+FastAPI Application Factory
+Creates and configures the FastAPI app instance
+"""
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.endpoints import manifest, catalog, configure, health
+from app.core.config import settings
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+logger = logging.getLogger(__name__)
+
+
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application"""
+    
+    app = FastAPI(
+        title="Dynamic Recommendations Stremio Addon",
+        description="Personalized movie and series recommendations based on your watch history",
+        version="1.0.0",
+        docs_url="/docs" if settings.DEBUG else None,
+        redoc_url="/redoc" if settings.DEBUG else None,
+    )
+    
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # Mount static files
+    try:
+        app.mount("/static", StaticFiles(directory="static"), name="static")
+    except Exception as e:
+        logger.warning(f"Could not mount static files: {e}")
+    
+    # Include routers
+    app.include_router(health.router)
+    app.include_router(configure.router)
+    app.include_router(manifest.router)
+    app.include_router(catalog.router)
+    
+    @app.on_event("startup")
+    async def startup_event():
+        logger.info("Starting Dynamic Recommendations Addon")
+        logger.info(f"Base URL: {settings.BASE_URL}")
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        logger.info("Shutting down Dynamic Recommendations Addon")
+    
+    return app
