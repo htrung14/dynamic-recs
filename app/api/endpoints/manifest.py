@@ -57,27 +57,29 @@ async def get_manifest(
     
     # Add movie catalogs if enabled
     if config.include_movies:
-        seeds_for_movies = loved_movies if loved_movies else recent_watches
-        use_loved_prefix = config.use_loved_items
+        # Prefer loved seeds first, then fall back to recent watches
+        seeds_for_movies = (loved_movies or []) + ([w for w in recent_watches if w not in loved_movies] if recent_watches else [])
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_movies):
                 imdb_id = seeds_for_movies[i]
+                is_loved_seed = i < len(loved_movies)
                 try:
                     tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
                     if tmdb_data:
                         title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Because you watched"
+                        prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Because you watched"
                         catalog_name = f"{prefix} {title}" if title else f"{prefix}"
                     else:
-                        prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Recommended Movies"
+                        prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
                         catalog_name = f"{prefix} #{i+1}"
                 except Exception as e:
                     logger.debug(f"Failed to get title for {imdb_id}: {e}")
-                    prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Recommended Movies"
+                    prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
                     catalog_name = f"{prefix} #{i+1}"
             else:
-                prefix = "🎬 Because you loved" if use_loved_prefix else "🎬 Recommended Movies"
+                # No seed available; default to generic row name
+                prefix = "🎬 Recommended Movies"
                 catalog_name = f"{prefix} #{i+1}"
             
             catalogs.append(
@@ -90,27 +92,29 @@ async def get_manifest(
     
     # Add series catalogs if enabled
     if config.include_series:
-        seeds_for_series = loved_series if loved_series else recent_watches
-        use_loved_prefix = config.use_loved_items
+        # Prefer loved seeds first, then fall back to recent watches
+        seeds_for_series = (loved_series or []) + ([w for w in recent_watches if w not in loved_series] if recent_watches else [])
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_series):
                 imdb_id = seeds_for_series[i]
+                is_loved_seed = i < len(loved_series)
                 try:
                     tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
                     if tmdb_data:
                         title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        prefix = "📺 Because you loved" if use_loved_prefix else "📺 Because you watched"
+                        prefix = "📺 Because you loved" if is_loved_seed else "📺 Because you watched"
                         catalog_name = f"{prefix} {title}" if title else f"{prefix}"
                     else:
-                        prefix = "📺 Because you loved" if use_loved_prefix else "📺 Recommended Series"
+                        prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
                         catalog_name = f"{prefix} #{i+1}"
                 except Exception as e:
                     logger.debug(f"Failed to get title for {imdb_id}: {e}")
-                    prefix = "📺 Because you loved" if use_loved_prefix else "📺 Recommended Series"
+                    prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
                     catalog_name = f"{prefix} #{i+1}"
             else:
-                prefix = "📺 Because you loved" if use_loved_prefix else "📺 Recommended Series"
+                # No seed available; default to generic row name
+                prefix = "📺 Recommended Series"
                 catalog_name = f"{prefix} #{i+1}"
             
             catalogs.append(
