@@ -439,16 +439,16 @@ docker run -d \
 
 ### Environment Variables
 
-| Variable                     | Description                       | Default | Required |
-| ---------------------------- | --------------------------------- | ------- | -------- |
-| `TOKEN_SALT`                 | Secret for token signing          | -       | Yes      |
-| `BASE_URL`                   | Public URL of addon               | -       | Yes      |
-| `REDIS_URL`                  | Redis connection URL              | -       | Yes      |
-| `TMDB_API_KEY`               | TMDB API key                      | -       | No       |
-| `MDBLIST_API_KEY`            | MDBList API key                   | -       | No       |
-| `CACHE_WARM_INTERVAL_HOURS`  | Hours between cache warming cycles| 3       | No       |
-| `DEBUG`                      | Enable debug mode                 | False   | No       |
-| `LOG_LEVEL`                  | Logging level                     | INFO    | No       |
+| Variable                    | Description                        | Default | Required |
+| --------------------------- | ---------------------------------- | ------- | -------- |
+| `TOKEN_SALT`                | Secret for token signing           | -       | Yes      |
+| `BASE_URL`                  | Public URL of addon                | -       | Yes      |
+| `REDIS_URL`                 | Redis connection URL               | -       | Yes      |
+| `TMDB_API_KEY`              | TMDB API key                       | -       | No       |
+| `MDBLIST_API_KEY`           | MDBList API key                    | -       | No       |
+| `CACHE_WARM_INTERVAL_HOURS` | Hours between cache warming cycles | 3       | No       |
+| `DEBUG`                     | Enable debug mode                  | False   | No       |
+| `LOG_LEVEL`                 | Logging level                      | INFO    | No       |
 
 ## 🔒 Security
 

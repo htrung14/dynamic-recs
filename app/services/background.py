@@ -67,7 +67,7 @@ class BackgroundTaskManager:
         
         logger.info("Cache warming cycle complete")
     
-    async def background_loop(self, interval_hours: int = 3):
+    async def background_loop(self, interval_hours: float = 3):
         """
         Background loop that warms caches periodically
         
@@ -90,7 +90,7 @@ class BackgroundTaskManager:
                 logger.error(f"Error in background loop: {e}", exc_info=True)
                 # Continue running despite errors
     
-    def start(self, interval_hours: int = 3):
+    def start(self, interval_hours: float = 3):
         """Start the background task"""
         if self.task is None or self.task.done():
             self.task = asyncio.create_task(self.background_loop(interval_hours))
