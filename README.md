@@ -249,6 +249,17 @@ python main.py
    ```
 5. Paste the value into the configuration page
 
+### Getting Your Stremio Loved Token (optional)
+
+Follow Stremio's Love button guide (https://blog.stremio.com/stremio-like-and-love-buttons/), then paste either the full link or the raw token into `/configure`:
+
+1. In Stremio, install/enable the Like & Love buttons add-on (per the blog post).
+2. Open the Stremio web app and click the **Loved** tab (heart icon) added by the add-on.
+3. Copy the full loved link from the address bar. Examples:
+  - `https://loves.stremio-addon.com/?token=...`
+  - `stremio://likes.stremio.com/addons/loved/movies-shows/<TOKEN>/manifest.json`
+4. Paste the full link (or just the token) into the **Stremio Loved Token or URL** field on `/configure`.
+
 ### API Keys (Optional)
 
 - **TMDB**: Free tier provides 40 requests/10 seconds - https://www.themoviedb.org/settings/api

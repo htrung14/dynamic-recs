@@ -244,10 +244,13 @@ async def configure_page():
                       placeholder="Your MDBList API key" value="__MDBLIST_DEFAULT__">
                   <div class="helper-text">Required - Get one at mdblist.com/api</div>
 
-                  <label for="stremio_loved_token">Stremio Loved Token (optional)</label>
+                  <label for="stremio_loved_token">Stremio Loved Token or URL (optional)</label>
                   <input type="text" id="stremio_loved_token"
-                      placeholder="Token from loves addon" value="__STREMIO_LOVED_DEFAULT__">
-                  <div class="helper-text">Optional: Paste the token from your Stremio loved addon URL. Uses server default if empty.</div>
+                      placeholder="Full loved add-on URL or token" value="__STREMIO_LOVED_DEFAULT__">
+                  <div class="helper-text">
+                      You can paste the entire loved add-on link (stremio://... or https://loves...) or just the token.
+                      Need a token? <a href="https://likes.stremio.com/addons/loved/configure" target="_blank" rel="noopener">Get one here</a>.
+                  </div>
             </div>
             
             <div class="form-group">
@@ -307,11 +310,47 @@ async def configure_page():
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const normalizeLovedToken = (raw) => {
+                const value = (raw || '').trim();
+                if (!value) return '';
+
+                // Handle query-param style: https://loves.stremio-addon.com/?token=...
+                if (value.includes('token=')) {
+                    try {
+                        const url = new URL(value.replace('stremio://', 'https://'));
+                        const tokenParam = url.searchParams.get('token');
+                        if (tokenParam) return decodeURIComponent(tokenParam);
+                    } catch (err) {
+                        // fall through to other parsing strategies
+                    }
+                }
+
+                // Handle path-style links: .../addons/loved/movies-shows/<token>/manifest.json
+                if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('stremio://')) {
+                    try {
+                        const url = new URL(value.replace('stremio://', 'https://'));
+                        const parts = url.pathname.split('/').filter(Boolean);
+                        if (parts.length >= 2) {
+                            const maybeManifest = parts[parts.length - 1].toLowerCase();
+                            const maybeToken = parts[parts.length - 2];
+                            if (maybeManifest === 'manifest.json' && maybeToken) {
+                                return decodeURIComponent(maybeToken);
+                            }
+                        }
+                    } catch (err) {
+                        // fall through to raw token
+                    }
+                }
+
+                // Raw token
+                return value;
+            };
+
             const config = {
                 stremio_auth_key: document.getElementById('stremio_auth').value.trim(),
                 tmdb_api_key: document.getElementById('tmdb_key').value.trim(),
                 mdblist_api_key: document.getElementById('mdblist_key').value.trim(),
-                stremio_loved_token: document.getElementById('stremio_loved_token').value.trim(),
+                stremio_loved_token: normalizeLovedToken(document.getElementById('stremio_loved_token').value),
                 num_rows: parseInt(document.getElementById('num_rows').value),
                 min_rating: parseFloat(document.getElementById('min_rating').value),
                 use_loved_items: document.getElementById('use_loved').checked,
