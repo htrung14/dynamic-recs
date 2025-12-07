@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     
     # API Rate Limits (requests per second)
     # Optimized for performance while staying within API limits
-    TMDB_RATE_LIMIT: int = 50  # TMDB allows 50/sec, use 45 (22ms overhead)
-    MDBLIST_RATE_LIMIT: int = 50  # MDBList allows 100k/day (~1.16 req/s), use 5 for good perf
-    STREMIO_RATE_LIMIT: int = 10  # Stremio is reliable, use 10 (100ms overhead)
+    TMDB_RATE_LIMIT: int = 50  # TMDB allows 50/sec
+    MDBLIST_RATE_LIMIT: int = 30  # MDBList allows 100k/day, 30 req/s = ~2.6M/day capacity
+    STREMIO_RATE_LIMIT: int = 0  # No rate limiting for Stremio (personal library access)
     
     # Development
     DEBUG: bool = False

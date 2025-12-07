@@ -53,12 +53,13 @@ class StremioClient:
         if cached:
             return cached
         
-        # Get or create shared rate limiter for this service
-        if StremioClient._rate_limiter is None:
-            StremioClient._rate_limiter = await RateLimiter.get_limiter(
-                "stremio", settings.STREMIO_RATE_LIMIT
-            )
-        await StremioClient._rate_limiter.acquire()
+        # Get or create shared rate limiter for this service (skip if rate limit is 0)
+        if settings.STREMIO_RATE_LIMIT > 0:
+            if StremioClient._rate_limiter is None:
+                StremioClient._rate_limiter = await RateLimiter.get_limiter(
+                    "stremio", settings.STREMIO_RATE_LIMIT
+                )
+            await StremioClient._rate_limiter.acquire()
         
         try:
             session = await self.get_session()
