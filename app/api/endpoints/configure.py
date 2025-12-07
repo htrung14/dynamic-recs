@@ -1,12 +1,63 @@
 """
 Configuration Endpoint
-Serves the configuration UI
+Serves the configuration UI and generates signed tokens
 """
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 from app.core.config import settings
+from app.models.config import UserConfig
+from app.utils.token import encode_config
 
 router = APIRouter()
+
+
+class ConfigRequest(BaseModel):
+    """Request model for token generation"""
+    stremio_auth_key: str
+    tmdb_api_key: str
+    mdblist_api_key: str
+    num_rows: int = 5
+    min_rating: float = 6.0
+    use_loved_items: bool = True
+    include_movies: bool = True
+    include_series: bool = True
+
+
+@router.post("/generate-token")
+async def generate_token(request: ConfigRequest):
+    """
+    Generate a signed token from user configuration
+    This endpoint creates properly signed tokens that the backend can validate
+    """
+    try:
+        # Create UserConfig from request
+        user_config = UserConfig(
+            stremio_auth_key=request.stremio_auth_key,
+            tmdb_api_key=request.tmdb_api_key,
+            mdblist_api_key=request.mdblist_api_key,
+            num_rows=request.num_rows,
+            min_rating=request.min_rating,
+            use_loved_items=request.use_loved_items,
+            include_movies=request.include_movies,
+            include_series=request.include_series
+        )
+        
+        # Generate signed token
+        token = encode_config(user_config)
+        
+        # Build install URL
+        base_url = str(settings.BASE_URL).rstrip('/')
+        install_url = f"{base_url}/{token}/manifest.json"
+        
+        return JSONResponse({
+            "success": True,
+            "token": token,
+            "install_url": install_url
+        })
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -274,13 +325,22 @@ async def configure_page():
             }
             
             try {
-                // Encode config
-                const configJson = JSON.stringify(config);
-                const token = btoa(configJson);
+                // Call server-side endpoint to generate signed token
+                const response = await fetch('/generate-token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
                 
-                // Generate install URL
-                const baseUrl = window.location.origin;
-                const installUrl = `${baseUrl}/${token}/manifest.json`;
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to generate token');
+                }
+                
+                const data = await response.json();
+                const installUrl = data.install_url;
                 
                 urlBox.textContent = installUrl;
                 installDiv.classList.add('visible');

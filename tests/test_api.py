@@ -35,6 +35,56 @@ async def test_configure_page():
 
 
 @pytest.mark.asyncio
+async def test_generate_token_endpoint():
+    """Test token generation endpoint with valid configuration"""
+    app = create_app()
+    
+    config_request = {
+        "stremio_auth_key": "test_auth_key",
+        "tmdb_api_key": "test_tmdb_key",
+        "mdblist_api_key": "test_mdblist_key",
+        "num_rows": 5,
+        "min_rating": 6.0,
+        "use_loved_items": True,
+        "include_movies": True,
+        "include_series": True
+    }
+    
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post("/generate-token", json=config_request)
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["success"] is True
+        assert "token" in data
+        assert "install_url" in data
+        assert data["install_url"].endswith("/manifest.json")
+        
+        # Verify token is valid by decoding it
+        from app.utils.token import decode_config
+        decoded_config = decode_config(data["token"])
+        assert decoded_config is not None
+        assert decoded_config.stremio_auth_key == "test_auth_key"
+
+
+@pytest.mark.asyncio
+async def test_generate_token_missing_fields():
+    """Test token generation endpoint with missing required fields"""
+    app = create_app()
+    
+    config_request = {
+        "stremio_auth_key": "test_auth_key"
+        # Missing required fields
+    }
+    
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post("/generate-token", json=config_request)
+        
+        assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.asyncio
 async def test_manifest_endpoint(sample_user_config):
     """Test manifest endpoint with valid token"""
     app = create_app()

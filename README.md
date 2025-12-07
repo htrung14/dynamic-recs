@@ -15,6 +15,49 @@ A high-performance, self-hosted Stremio addon that generates personalized movie 
 
 ## 🚀 Quick Start
 
+### ⚠️ Important Update: Token Generation Fix
+
+**The configuration page has been fixed to generate properly signed tokens.**
+
+**What was the issue?**
+
+- The frontend previously used client-side `btoa()` encoding, creating unsigned tokens
+- Backend requires HMAC-signed tokens with `TOKEN_SALT` for security
+- This mismatch caused "Invalid configuration token" errors
+
+**What's fixed now?**
+
+- Frontend now calls `/generate-token` server endpoint
+- Server generates properly signed tokens that work with the backend
+- All tokens from the configuration page now work correctly
+
+**Alternative: Generate tokens via Python script**
+
+If you prefer command-line token generation:
+
+```bash
+# Interactive token generator
+python generate_token.py
+
+# Or use Python directly
+python -c "
+from app.models.config import UserConfig
+from app.utils.token import encode_config
+
+config = UserConfig(
+    stremio_auth_key='YOUR_STREMIO_AUTH_KEY',
+    tmdb_api_key='YOUR_TMDB_KEY',
+    mdblist_api_key='YOUR_MDBLIST_KEY'
+)
+token = encode_config(config)
+print(f'http://localhost:8000/{token}/manifest.json')
+"
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for more details.
+
+---
+
 ### Prerequisites
 
 - Docker and Docker Compose
@@ -63,6 +106,134 @@ docker-compose up -d
    - Enter your Stremio auth key and preferences
    - Click "Generate Install URL"
    - Copy the URL and add it to Stremio via "Add-ons" → "Install from URL"
+
+---
+
+## 🤖 LLM Deployment Instructions
+
+**For AI agents deploying this application via terminal:**
+
+### Step 1: Setup Environment
+
+```bash
+# Navigate to project directory
+cd /path/to/dynamic-recs
+
+# Create .env file from example
+cp .env.example .env
+
+# Generate secure token salt and update .env
+TOKEN=$(python -c "import secrets; print(secrets.token_hex(32))")
+sed -i.bak "s/TOKEN_SALT=.*/TOKEN_SALT=$TOKEN/" .env
+
+# Update BASE_URL if deploying to production
+# sed -i.bak "s|BASE_URL=.*|BASE_URL=https://your-domain.com|" .env
+
+# Add API keys (replace with actual keys)
+sed -i.bak "s/TMDB_API_KEY=.*/TMDB_API_KEY=your_actual_tmdb_key/" .env
+sed -i.bak "s/MDBLIST_API_KEY=.*/MDBLIST_API_KEY=your_actual_mdblist_key/" .env
+```
+
+### Step 2: Verify Docker Installation
+
+```bash
+# Check Docker is installed
+docker --version || echo "Docker not found - install from https://docker.com"
+docker-compose --version || echo "Docker Compose not found"
+
+# Check Docker is running
+docker ps || echo "Docker daemon not running - start Docker Desktop"
+```
+
+### Step 3: Deploy with Docker Compose
+
+```bash
+# Build and start containers in detached mode
+docker-compose up -d --build
+
+# Verify containers are running
+docker-compose ps
+
+# Check addon logs
+docker-compose logs addon
+
+# Check Redis logs
+docker-compose logs redis
+```
+
+### Step 4: Verify Deployment
+
+```bash
+# Wait for services to be healthy (max 30 seconds)
+for i in {1..30}; do
+  curl -f http://localhost:8000/health && break || sleep 1
+done
+
+# Test configuration endpoint
+curl -I http://localhost:8000/configure
+
+# Check if services are accessible
+echo "✅ Addon is running at: http://localhost:8000"
+echo "✅ Configuration page: http://localhost:8000/configure"
+```
+
+### Step 5: Monitor and Troubleshoot
+
+```bash
+# View live logs
+docker-compose logs -f addon
+
+# Check container health
+docker-compose ps
+
+# Restart if needed
+docker-compose restart addon
+
+# Stop all services
+docker-compose down
+
+# Stop and remove all data
+docker-compose down -v
+```
+
+### Alternative: Local Development (Without Docker)
+
+```bash
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start Redis (required)
+docker run -d --name dynamic-recs-redis -p 6379:6379 redis:7-alpine
+
+# Start the server
+python main.py
+
+# Server will be available at http://localhost:8000
+```
+
+### Production Deployment Checklist
+
+- [ ] Set `BASE_URL` to your public domain in `.env`
+- [ ] Use strong `TOKEN_SALT` (auto-generated above)
+- [ ] Configure reverse proxy (nginx/Caddy) with SSL
+- [ ] Set up firewall rules (allow 80/443, block 8000 direct access)
+- [ ] Enable Docker restart policies: `restart: unless-stopped`
+- [ ] Set up log rotation for Docker containers
+- [ ] Monitor Redis memory usage
+- [ ] Set up backups for Redis data (if needed)
+- [ ] Configure rate limiting at reverse proxy level
+
+### Health Check Endpoints
+
+- `GET /health` - Returns 200 if service is healthy
+- `GET /configure` - Configuration UI should load
+- `GET /{token}/manifest.json` - Test manifest endpoint (requires valid token)
+
+---
 
 ## 🔧 Configuration
 

@@ -3,12 +3,18 @@ Configuration Management
 Loads and validates environment variables
 """
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 import secrets
 
 
 class Settings(BaseSettings):
     """Application settings from environment variables"""
+    
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+    )
     
     # Required
     TOKEN_SALT: str = secrets.token_hex(32)
@@ -35,10 +41,6 @@ class Settings(BaseSettings):
     # Development
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 settings = Settings()

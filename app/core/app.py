@@ -2,6 +2,7 @@
 FastAPI Application Factory
 Creates and configures the FastAPI app instance
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown"""
+    # Startup
+    logger.info("Starting Dynamic Recommendations Addon")
+    logger.info(f"Base URL: {settings.BASE_URL}")
+    yield
+    # Shutdown
+    logger.info("Shutting down Dynamic Recommendations Addon")
+
+
 def create_app() -> FastAPI:
     """Create and configure FastAPI application"""
     
@@ -27,6 +39,7 @@ def create_app() -> FastAPI:
         version="1.0.0",
         docs_url="/docs" if settings.DEBUG else None,
         redoc_url="/redoc" if settings.DEBUG else None,
+        lifespan=lifespan,
     )
     
     # CORS middleware
@@ -49,14 +62,5 @@ def create_app() -> FastAPI:
     app.include_router(configure.router)
     app.include_router(manifest.router)
     app.include_router(catalog.router)
-    
-    @app.on_event("startup")
-    async def startup_event():
-        logger.info("Starting Dynamic Recommendations Addon")
-        logger.info(f"Base URL: {settings.BASE_URL}")
-    
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        logger.info("Shutting down Dynamic Recommendations Addon")
     
     return app
