@@ -251,6 +251,10 @@ class RecommendationEngine:
         for item in filtered:
             item_id = str(item["id"])
             
+            # Fallback to TMDB vote_average when mdblist rating is missing
+            if item.get("merged_rating") is None:
+                item["merged_rating"] = item.get("vote_average", 0.0)
+            
             freq_score = freq_scores.get(item_id, 0.0)
             rating_score = item.get("merged_rating", 0.0) / 10.0
             popularity_score = min(item.get("popularity", 0.0) / 100.0, 1.0)
@@ -307,7 +311,10 @@ class RecommendationEngine:
         recommendations = await self.fetch_recommendations_for_seeds(seeds)
         
         if not recommendations:
-            logger.warning("No recommendations fetched from TMDB, falling back to popular feed")
+            logger.info(
+                "No recommendations from seeds (may be normal if items lack TMDB recs), using popular feed for %s",
+                media_type or "all"
+            )
             # Use TMDB popular as fallback to avoid empty catalogs
             if media_type in {"movie", "series"}:
                 tmdb_type = "movie" if media_type == "movie" else "tv"
@@ -316,6 +323,7 @@ class RecommendationEngine:
                 # default to movies popular
                 recommendations = await self.tmdb.get_popular("movie", page=1)
             if not recommendations:
+                logger.warning("Popular feed also returned no results for %s", media_type)
                 return []
         
         # Ensure external_ids/imdb_id present for poster conversion and scoring

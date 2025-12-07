@@ -69,8 +69,21 @@ class TMDBClient:
                     logger.warning("TMDB rate limit exceeded")
                     await asyncio.sleep(1)
                     return None
+                elif response.status == 404:
+                    # 404 is expected for items without recommendations or invalid IDs
+                    # Only log at debug level to avoid noise
+                    logger.debug(
+                        "TMDB 404 for %s (id may not exist or have no data)",
+                        endpoint,
+                    )
+                    return None
                 else:
-                    logger.error(f"TMDB API error: {response.status}")
+                    logger.error(
+                        "TMDB API error: %s for %s params=%s",
+                        response.status,
+                        endpoint,
+                        request_params,
+                    )
                     return None
                     
         except asyncio.TimeoutError:
