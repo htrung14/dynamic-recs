@@ -359,6 +359,14 @@ class RecommendationEngine:
         """
         logger.info(f"Generating recommendations (media_type={media_type})...")
         cache_key = f"user:{self.config.stremio_auth_key}:recs:{media_type or 'all'}"
+
+        # Resolve auth key (support username/password-backed configs)
+        auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            logger.warning("No valid Stremio auth key available; skipping recommendations")
+            return []
+        self.config.stremio_auth_key = auth_key
+        cache_key = f"user:{auth_key}:recs:{media_type or 'all'}"
         
         # Check cache first
         cached = await self.cache.get(cache_key)

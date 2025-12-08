@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Any
 from app.core.config import settings
 from app.services.cache import CacheManager
 from app.utils.rate_limiter import RateLimiter
+from app.utils.crypto import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class StremioClient:
     """Async client for Stremio API"""
     
     API_URL = "https://api.strem.io/api/datastoreGet"
+    LOGIN_URL = "https://api.strem.io/api/login"
     LOVED_BASE_URL = "https://likes.stremio.com"
     _rate_limiter: Optional[RateLimiter] = None
     
@@ -37,6 +39,50 @@ class StremioClient:
         """Close aiohttp session"""
         if self.session and not self.session.closed:
             await self.session.close()
+
+    async def login_with_credentials(self, username: str, password: str) -> Optional[str]:
+        """Login to Stremio using username/password and return authKey."""
+        try:
+            session = await self.get_session()
+            payload = {
+                "type": "Login",
+                "email": username,
+                "password": password,
+            }
+            async with session.post(self.LOGIN_URL, json=payload, timeout=15) as response:
+                if response.status != 200:
+                    logger.warning(f"Stremio login failed with status {response.status}")
+                    return None
+                data = await response.json()
+                auth_key = (
+                    data.get("authKey")
+                    or data.get("result", {}).get("authKey")
+                )
+                if not auth_key:
+                    logger.warning("Stremio login succeeded but no authKey returned")
+                return auth_key
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Stremio login error: {exc}")
+            return None
+
+    async def resolve_auth_key(self, config) -> Optional[str]:
+        """Resolve auth key from config, using stored key or decrypting credentials."""
+        if getattr(config, "stremio_auth_key", None):
+            return config.stremio_auth_key
+
+        username_enc = getattr(config, "stremio_username_enc", None)
+        password_enc = getattr(config, "stremio_password_enc", None)
+        if username_enc and password_enc:
+            username = decrypt_secret(username_enc)
+            password = decrypt_secret(password_enc)
+            if not username or not password:
+                logger.warning("Failed to decrypt Stremio credentials")
+                return None
+            auth_key = await self.login_with_credentials(username, password)
+            if auth_key:
+                config.stremio_auth_key = auth_key
+                return auth_key
+        return None
     
     async def fetch_library(self, auth_key: str) -> Optional[Dict[str, Any]]:
         """

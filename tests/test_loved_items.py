@@ -4,23 +4,26 @@ Test loved items vs watch history priority
 """
 import asyncio
 import os
-from typing import Optional
+from typing import Optional, cast
+import pytest
 from app.core.config import settings
 from app.models.config import UserConfig
 from app.services.recommendations import RecommendationEngine
 
 
-def require(value: Optional[str], name: str) -> str:
-    if not value:
-        raise RuntimeError(f"Set {name} in env before running this test script")
-    return value
+STREMIO_AUTH = os.environ.get("STREMIO_AUTH_KEY")
+TMDB_KEY = os.environ.get("TMDB_API_KEY") or settings.TMDB_API_KEY
+MDBLIST_KEY = os.environ.get("MDBLIST_API_KEY") or settings.MDBLIST_API_KEY
+
+if not (STREMIO_AUTH and TMDB_KEY and MDBLIST_KEY):
+    pytest.skip("Integration credentials not provided; skipping loved items test", allow_module_level=True)
+
+tmdb_api_key = cast(str, TMDB_KEY)
+mdblist_api_key = cast(str, MDBLIST_KEY)
+stremio_auth_key = cast(str, STREMIO_AUTH)
 
 async def test_loved_items_priority():
     """Test that loved items take priority over watch history"""
-    
-    stremio_auth_key = require(os.environ.get("STREMIO_AUTH_KEY"), "STREMIO_AUTH_KEY")
-    tmdb_api_key = require(os.environ.get("TMDB_API_KEY") or settings.TMDB_API_KEY, "TMDB_API_KEY")
-    mdblist_api_key = require(os.environ.get("MDBLIST_API_KEY") or settings.MDBLIST_API_KEY, "MDBLIST_API_KEY")
     
     print("=" * 70)
     print("Testing Loved Items Priority")
@@ -32,6 +35,8 @@ async def test_loved_items_priority():
     
     config_with_loved = UserConfig(
         stremio_auth_key=stremio_auth_key,
+        stremio_username_enc=None,
+        stremio_password_enc=None,
         stremio_loved_token=os.environ.get("STREMIO_LOVED_TOKEN"),
         tmdb_api_key=tmdb_api_key,
         mdblist_api_key=mdblist_api_key,
@@ -84,6 +89,8 @@ async def test_loved_items_priority():
     
     config_without_loved = UserConfig(
         stremio_auth_key=stremio_auth_key,
+        stremio_username_enc=None,
+        stremio_password_enc=None,
         stremio_loved_token=None,
         tmdb_api_key=tmdb_api_key,
         mdblist_api_key=mdblist_api_key,

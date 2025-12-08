@@ -9,13 +9,16 @@ from typing import Optional
 from app.core.config import settings
 from app.models.config import UserConfig
 from app.utils.token import encode_config
+from app.utils.crypto import encrypt_secret
 
 router = APIRouter()
 
 
 class ConfigRequest(BaseModel):
     """Request model for token generation"""
-    stremio_auth_key: str
+    stremio_auth_key: Optional[str] = None
+    stremio_username: Optional[str] = None
+    stremio_password: Optional[str] = None
     tmdb_api_key: str
     mdblist_api_key: str
     num_rows: int = 5
@@ -33,9 +36,17 @@ async def generate_token(request: ConfigRequest):
     This endpoint creates properly signed tokens that the backend can validate
     """
     try:
+        if not request.stremio_auth_key and not (request.stremio_username and request.stremio_password):
+            raise ValueError("Provide either stremio_auth_key or stremio_username/password")
+
+        username_enc = encrypt_secret(request.stremio_username) if request.stremio_username else None
+        password_enc = encrypt_secret(request.stremio_password) if request.stremio_password else None
+
         # Create UserConfig from request
         user_config = UserConfig(
-            stremio_auth_key=request.stremio_auth_key,
+            stremio_auth_key=request.stremio_auth_key or None,
+            stremio_username_enc=username_enc,
+            stremio_password_enc=password_enc,
             tmdb_api_key=request.tmdb_api_key,
             mdblist_api_key=request.mdblist_api_key,
             num_rows=request.num_rows,
@@ -225,10 +236,18 @@ async def configure_page():
         
         <form id="configForm">
             <div class="form-group">
-                <label for="stremio_auth">Stremio Auth Key *</label>
-                <input type="text" id="stremio_auth" required 
+                <label for="stremio_auth">Stremio Auth Key</label>
+                <input type="text" id="stremio_auth"
                        placeholder="Your Stremio authentication key">
-                <div class="helper-text">Required to access your watch history</div>
+                <div class="helper-text">Option A: paste an existing auth key</div>
+            </div>
+
+            <div class="form-group">
+                <label for="stremio_username">Stremio Email/Username</label>
+                <input type="text" id="stremio_username" placeholder="you@example.com">
+                <div class="helper-text">Option B: provide credentials to auto-login and fetch an auth key (encrypted in token)</div>
+                <label for="stremio_password">Stremio Password</label>
+                <input type="password" id="stremio_password" placeholder="Password">
             </div>
             
             <div class="form-group">
@@ -348,6 +367,8 @@ async def configure_page():
 
             const config = {
                 stremio_auth_key: document.getElementById('stremio_auth').value.trim(),
+                stremio_username: document.getElementById('stremio_username').value.trim(),
+                stremio_password: document.getElementById('stremio_password').value,
                 tmdb_api_key: document.getElementById('tmdb_key').value.trim(),
                 mdblist_api_key: document.getElementById('mdblist_key').value.trim(),
                 stremio_loved_token: normalizeLovedToken(document.getElementById('stremio_loved_token').value),
@@ -358,8 +379,10 @@ async def configure_page():
                 include_series: document.getElementById('include_series').checked
             };
             
-            if (!config.stremio_auth_key) {
-                showError('Stremio Auth Key is required');
+            const hasAuth = !!config.stremio_auth_key;
+            const hasCreds = !!(config.stremio_username && config.stremio_password);
+            if (!hasAuth && !hasCreds) {
+                showError('Provide Stremio auth key or username + password');
                 return;
             }
             

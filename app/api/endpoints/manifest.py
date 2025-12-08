@@ -39,7 +39,11 @@ async def get_manifest(
     tmdb = TMDBClient(config.tmdb_api_key)
     
     try:
-        library = await stremio.fetch_library(config.stremio_auth_key)
+        auth_key = await stremio.resolve_auth_key(config)
+        if not auth_key:
+            raise HTTPException(status_code=401, detail="Stremio authentication failed")
+
+        library = await stremio.fetch_library(auth_key)
         recent_watches = stremio.extract_recently_watched(library, limit=max(config.num_rows, 10))
     except Exception as e:
         logger.warning(f"Failed to fetch library for manifest: {e}")

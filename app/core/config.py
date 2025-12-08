@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Encryption for stored credentials
+    STREMIO_CREDENTIAL_KEY: str = secrets.token_hex(32)
     
     # Cache TTLs (seconds)
     CACHE_TTL_LIBRARY: int = 21600  # 6 hours

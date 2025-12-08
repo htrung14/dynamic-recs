@@ -25,7 +25,7 @@ class BackgroundTaskManager:
     
     def register_config(self, config: UserConfig):
         """Register a user config for background cache warming"""
-        config_key = config.stremio_auth_key
+        config_key = config.stremio_auth_key or config.stremio_username_enc or "unknown"
         if config_key not in self.active_configs:
             self.active_configs.add(config_key)
             self.config_cache[config_key] = config
@@ -37,15 +37,20 @@ class BackgroundTaskManager:
         
         Fetches fresh library history, filters by 50% progress, loved items, then generates recommendations
         """
-        auth_key_short = config.stremio_auth_key[:10]
+        auth_key_short = (config.stremio_auth_key or config.stremio_username_enc or "unknown")[:10]
         logger.info(f"[Background] Starting cache warming for {auth_key_short}...")
         try:
             # Refresh library history
             stremio = StremioClient()
+            auth_key = await stremio.resolve_auth_key(config)
+            if not auth_key:
+                logger.warning(f"[Background] No Stremio auth key for {auth_key_short}; skipping warming")
+                await stremio.close()
+                return
             library = None
             try:
                 logger.debug(f"[Background] Refreshing library history for {auth_key_short}...")
-                library = await stremio.fetch_library(config.stremio_auth_key)  # Forces fresh fetch
+                library = await stremio.fetch_library(auth_key)  # Forces fresh fetch
                 all_watched = stremio.extract_recently_watched(library, limit=100)
                 logger.info(f"[Background] Library refreshed: {len(all_watched)} recently watched items")
             except Exception as e:
@@ -68,7 +73,7 @@ class BackgroundTaskManager:
                     all_watched = stremio.extract_recently_watched(library, limit=100)
                     # Filter to items watched 50%+ (in parallel for efficiency)
                     filtered_watched = await stremio.filter_by_progress(
-                        config.stremio_auth_key, all_watched, min_progress=0.5
+                        auth_key, all_watched, min_progress=0.5
                     )
                     logger.info(f"[Background] Progress filtered: {len(all_watched)} -> {len(filtered_watched)} items (50%+ progress)")
             except Exception as e:
