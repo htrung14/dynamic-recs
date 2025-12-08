@@ -168,8 +168,10 @@ class RecommendationEngine:
         
         # Check cache for enriched items first
         for item in items:
+            # Default media_type so downstream filtering doesn't drop items
+            media_type = item.get("media_type") or "movie"
+            item["media_type"] = media_type
             tmdb_id = item.get("id")
-            media_type = item.get("media_type", "movie")
             
             # Check if already has IMDB ID
             external_ids = item.get("external_ids", {})
