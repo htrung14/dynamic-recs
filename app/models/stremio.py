@@ -28,7 +28,7 @@ class Manifest(BaseModel):
     catalogs: List[ManifestCatalog]
     
     behaviorHints: dict = {
-        "configurable": False,
+        "configurable": True,
         "configurationRequired": False,
         "adult": False,
         "p2p": False

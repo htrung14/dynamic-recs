@@ -9,6 +9,7 @@ from typing import Optional
 from app.core.config import settings
 from app.models.config import UserConfig
 from app.utils.token import encode_config
+from app.services.stremio import StremioClient
 from app.utils.crypto import encrypt_secret
 
 router = APIRouter()
@@ -27,6 +28,24 @@ class ConfigRequest(BaseModel):
     include_movies: bool = True
     include_series: bool = True
     stremio_loved_token: Optional[str] = None
+
+
+class AuthRequest(BaseModel):
+    stremio_username: str
+    stremio_password: str
+
+
+@router.post("/fetch-auth-key")
+async def fetch_auth_key(request: AuthRequest):
+    """Exchange username/password for a Stremio auth key."""
+    client = StremioClient()
+    try:
+        auth_key = await client.login_with_credentials(request.stremio_username, request.stremio_password)
+        if not auth_key:
+            raise HTTPException(status_code=401, detail="Invalid Stremio credentials")
+        return {"success": True, "auth_key": auth_key}
+    finally:
+        await client.close()
 
 
 @router.post("/generate-token")
@@ -131,13 +150,25 @@ async def configure_page():
             font-size: 14px;
         }
         input[type="text"],
-        input[type="number"] {
+        input[type="number"],
+        input[type="password"] {
             width: 100%;
             padding: 12px;
             border: 2px solid #e0e0e0;
             border-radius: 8px;
             font-size: 14px;
             transition: border-color 0.3s;
+        }
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .button-secondary {
+            background: #4a5568;
+        }
+        .button-secondary:hover {
+            background: #2d3748;
         }
         input:focus {
             outline: none;
@@ -248,6 +279,10 @@ async def configure_page():
                 <div class="helper-text">Option B: provide credentials to auto-login and fetch an auth key (encrypted in token)</div>
                 <label for="stremio_password">Stremio Password</label>
                 <input type="password" id="stremio_password" placeholder="Password">
+                <div class="button-row">
+                    <button type="button" class="button-secondary" id="load_auth_btn">Load Auth Token</button>
+                </div>
+                <div class="helper-text" id="auth_status"></div>
             </div>
             
             <div class="form-group">
@@ -325,6 +360,11 @@ async def configure_page():
         const installDiv = document.getElementById('installUrl');
         const urlBox = document.getElementById('urlBox');
         const errorDiv = document.getElementById('error');
+        const authField = document.getElementById('stremio_auth');
+        const authStatus = document.getElementById('auth_status');
+        const loadAuthBtn = document.getElementById('load_auth_btn');
+        const usernameInput = document.getElementById('stremio_username');
+        const passwordInput = document.getElementById('stremio_password');
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -442,6 +482,52 @@ async def configure_page():
             errorDiv.classList.add('visible');
             installDiv.classList.remove('visible');
         }
+
+        const maybeUnlockAuthField = () => {
+            if (!usernameInput.value.trim() && !passwordInput.value) {
+                authField.disabled = false;
+                authField.style.background = '';
+                authStatus.textContent = '';
+            }
+        };
+
+        usernameInput.addEventListener('input', maybeUnlockAuthField);
+        passwordInput.addEventListener('input', maybeUnlockAuthField);
+
+        loadAuthBtn.addEventListener('click', async () => {
+            const username = document.getElementById('stremio_username').value.trim();
+            const password = document.getElementById('stremio_password').value;
+            if (!username || !password) {
+                authStatus.textContent = 'Enter username and password first';
+                authStatus.style.color = '#d32f2f';
+                return;
+            }
+            loadAuthBtn.disabled = true;
+            authStatus.textContent = 'Loading auth token…';
+            authStatus.style.color = '#666';
+            try {
+                const resp = await fetch('/fetch-auth-key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stremio_username: username, stremio_password: password })
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || 'Login failed');
+                }
+                const data = await resp.json();
+                authField.value = data.auth_key || '';
+                authField.disabled = true;
+                authField.style.background = '#f0f0f0';
+                authStatus.textContent = 'Auth token loaded and locked';
+                authStatus.style.color = '#2f855a';
+            } catch (err) {
+                authStatus.textContent = err.message;
+                authStatus.style.color = '#d32f2f';
+            } finally {
+                loadAuthBtn.disabled = false;
+            }
+        });
     </script>
 </body>
 </html>

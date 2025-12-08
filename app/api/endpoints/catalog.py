@@ -7,6 +7,7 @@ from app.models.stremio import CatalogResponse, MetaPoster
 from app.services.recommendations import RecommendationEngine
 from app.services.background import get_task_manager
 from app.utils.token import decode_config
+from app.services.cinemeta import CinemetaClient
 import asyncio
 import logging
 
@@ -92,6 +93,9 @@ async def get_catalog(
     if not id.startswith("dynamic_"):
         raise HTTPException(status_code=404, detail="Catalog not found")
     
+    cinemeta = CinemetaClient()
+    engine: RecommendationEngine = None  # type: ignore
+
     try:
         # Register config for background cache warming
         task_manager = get_task_manager()
@@ -105,9 +109,6 @@ async def get_catalog(
         
         # Schedule background cache warming for this config (non-blocking)
         asyncio.create_task(task_manager.warm_cache_for_config(config))
-        
-        # Close engine connections
-        await engine.close()
         
         # Convert to MetaPoster objects
         metas = []
@@ -134,11 +135,27 @@ async def get_catalog(
                     item.get("id")
                 )
                 continue
-            
+
+            # Cinemeta fallback for missing visuals/overview
+            needs_fallback = not (item.get("poster_path") and item.get("backdrop_path") and item.get("overview"))
+            if needs_fallback:
+                meta_fallback = await cinemeta.fetch_meta(type, imdb_id)
+                if meta_fallback:
+                    item.setdefault("overview", meta_fallback.get("description"))
+                    item.setdefault("poster_path", meta_fallback.get("poster"))
+                    item.setdefault("backdrop_path", meta_fallback.get("background"))
+                    item.setdefault("release_date", meta_fallback.get("releaseInfo"))
+                    rating = meta_fallback.get("imdbRating")
+                    if rating and not item.get("merged_rating"):
+                        try:
+                            item["merged_rating"] = float(rating)
+                        except Exception:
+                            pass
+
             try:
                 meta = convert_to_meta_poster(item, type)
                 metas.append(meta)
-            except Exception as e:
+            except Exception:
                 logger.warning(
                     "Failed to convert item to MetaPoster: %s (tmdb_id=%s)",
                     item.get("title") or item.get("name"),
@@ -154,3 +171,7 @@ async def get_catalog(
     except Exception as e:
         logger.error(f"Error generating catalog: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate recommendations")
+    finally:
+        await cinemeta.close()
+        if engine:
+            await engine.close()
