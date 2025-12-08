@@ -241,7 +241,19 @@ isn        Extract loved/favorited items from library
                 if response.status == 200:
                     data = await response.json()
                     result = data.get("result", {})
-                    
+
+                    # Some responses return a list of entries instead of a dict
+                    if isinstance(result, list):
+                        # Pick the first dict entry that has "watched"
+                        for entry in result:
+                            if isinstance(entry, dict) and "watched" in entry:
+                                result = entry
+                                break
+                        else:
+                            result = {}
+                    elif not isinstance(result, dict):
+                        result = {}
+
                     # Extract progress (0.0-1.0)
                     progress = result.get("watched", 0.0)
                     if isinstance(progress, (int, float)):
