@@ -4,6 +4,7 @@ Async client for MDBList ratings and metadata
 import aiohttp
 import asyncio
 import logging
+import time
 from typing import List, Dict, Optional, Any
 from app.core.config import settings
 from app.services.cache import CacheManager
@@ -17,6 +18,8 @@ class MDBListClient:
     
     BASE_URL = "https://mdblist.com/api/"
     _rate_limiter: Optional[RateLimiter] = None
+    _last_503_log: float = 0.0
+    UNAVAILABLE_LOG_COOLDOWN = 10  # seconds
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.MDBLIST_API_KEY
@@ -89,7 +92,10 @@ class MDBListClient:
                     await asyncio.sleep(2)
                     return None
                 elif response.status == 503:
-                    logger.debug(f"MDBList temporarily unavailable (503)")
+                    now = time.monotonic()
+                    if now - MDBListClient._last_503_log > MDBListClient.UNAVAILABLE_LOG_COOLDOWN:
+                        MDBListClient._last_503_log = now
+                        logger.debug("MDBList temporarily unavailable (503)")
                     return None
                 else:
                     logger.error(f"MDBList API error: {response.status}")
