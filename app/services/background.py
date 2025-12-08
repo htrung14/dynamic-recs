@@ -7,6 +7,7 @@ import logging
 from typing import Set, Optional
 from datetime import datetime
 from app.services.recommendations import RecommendationEngine
+from app.services.stremio import StremioClient
 from app.models.config import UserConfig
 from app.core.config import settings
 
@@ -18,6 +19,7 @@ class BackgroundTaskManager:
     
     def __init__(self):
         self.active_configs: Set[str] = set()
+        self.config_cache: dict = {}  # Store full configs for background tasks
         self.task: Optional[asyncio.Task] = None
         self.running = False
     
@@ -26,29 +28,63 @@ class BackgroundTaskManager:
         config_key = config.stremio_auth_key
         if config_key not in self.active_configs:
             self.active_configs.add(config_key)
+            self.config_cache[config_key] = config
             logger.info(f"Registered config for background warming: {config_key[:10]}...")
     
     async def warm_cache_for_config(self, config: UserConfig):
         """
         Warm cache for a single user configuration
         
-        Fetches recommendations for both movies and series and stores in cache
+        Fetches fresh library history, filters by 50% progress, loved items, then generates recommendations
         """
         try:
+            # Refresh library history
+            stremio = StremioClient()
+            try:
+                logger.debug(f"Refreshing library history for {config.stremio_auth_key[:10]}...")
+                await stremio.fetch_library(config.stremio_auth_key)  # Forces fresh fetch
+            except Exception as e:
+                logger.warning(f"Error refreshing library: {e}")
+            
+            # Refresh loved items if enabled
+            if config.use_loved_items:
+                try:
+                    logger.debug(f"Refreshing loved catalogs for {config.stremio_auth_key[:10]}...")
+                    await stremio.fetch_loved_catalog("movie", token=config.stremio_loved_token)
+                    await stremio.fetch_loved_catalog("series", token=config.stremio_loved_token)
+                except Exception as e:
+                    logger.warning(f"Error refreshing loved catalogs: {e}")
+            
+            # Filter watched items by 50% progress
+            try:
+                logger.debug(f"Filtering watched items by 50% progress for {config.stremio_auth_key[:10]}...")
+                library = await stremio.fetch_library(config.stremio_auth_key)
+                if library:
+                    all_watched = stremio.extract_recently_watched(library, limit=100)
+                    # Filter to items watched 50%+ (in parallel for efficiency)
+                    filtered_watched = await stremio.filter_by_progress(
+                        config.stremio_auth_key, all_watched, min_progress=0.5
+                    )
+                    logger.debug(f"Filtered to {len(filtered_watched)} items with 50%+ progress")
+            except Exception as e:
+                logger.warning(f"Error filtering by progress: {e}")
+            
+            await stremio.close()
+            
             engine = RecommendationEngine(config)
             
             # Warm cache for movies if enabled
             if config.include_movies:
-                logger.debug(f"Warming movie cache for {config.stremio_auth_key[:10]}...")
+                logger.debug(f"Warming movie recommendations for {config.stremio_auth_key[:10]}...")
                 await engine.generate_recommendations(media_type="movie")
             
             # Warm cache for series if enabled
             if config.include_series:
-                logger.debug(f"Warming series cache for {config.stremio_auth_key[:10]}...")
+                logger.debug(f"Warming series recommendations for {config.stremio_auth_key[:10]}...")
                 await engine.generate_recommendations(media_type="series")
             
             await engine.close()
-            logger.info(f"Cache warmed successfully for {config.stremio_auth_key[:10]}...")
+            logger.info(f"Cache warmed (library + progress filter + loved + recs) for {config.stremio_auth_key[:10]}...")
             
         except Exception as e:
             logger.error(f"Error warming cache for config: {e}", exc_info=True)
@@ -59,13 +95,24 @@ class BackgroundTaskManager:
             logger.debug("No configs registered for cache warming")
             return
         
-        logger.info(f"Starting cache warming for {len(self.active_configs)} configs")
+        logger.info(f"Starting cache warming cycle for {len(self.active_configs)} configs (library + loved + recs)")
         
-        # Note: We only have config keys, not full configs
-        # In production, you'd store full configs or reconstruct them
-        # For now, this serves as a framework that gets triggered by actual requests
+        # Warm all registered configs in parallel
+        tasks = []
+        for config_key in self.active_configs:
+            config = self.config_cache.get(config_key)
+            if config:
+                tasks.append(self.warm_cache_for_config(config))
         
-        logger.info("Cache warming cycle complete")
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            errors = [r for r in results if isinstance(r, Exception)]
+            if errors:
+                logger.warning(f"Cache warming completed with {len(errors)} errors")
+            else:
+                logger.info(f"Cache warming cycle complete ({len(self.active_configs)} configs refreshed)")
+        else:
+            logger.info("No configs found to warm")
     
     async def background_loop(self, interval_hours: float = 3):
         """

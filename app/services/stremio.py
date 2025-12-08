@@ -97,7 +97,7 @@ class StremioClient:
     
     def extract_loved_items(self, library: Optional[Dict[str, Any]]) -> List[str]:
         """
-        Extract loved/favorited items from library
+isn        Extract loved/favorited items from library
         
         Args:
             library: Stremio library data (format: {"result": [["id", timestamp], ...]})
@@ -210,3 +210,81 @@ class StremioClient:
         watched_with_time.sort(key=lambda x: x[1], reverse=True)
         
         return [imdb_id for imdb_id, _ in watched_with_time[:limit]]
+    
+    async def fetch_watched_progress(self, auth_key: str, imdb_id: str) -> Optional[float]:
+        """
+        Fetch watch progress for a single item (0-1 scale, 0.5 = 50%)
+        
+        Args:
+            auth_key: Stremio authentication key
+            imdb_id: IMDB ID (e.g., tt1234567)
+            
+        Returns:
+            Progress as float 0.0-1.0, or None on error
+        """
+        cache_key = f"progress:{auth_key}:{imdb_id}"
+        
+        # Check cache first
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+        
+        try:
+            session = await self.get_session()
+            payload = {
+                "authKey": auth_key,
+                "collection": "libraryItem",
+                "id": imdb_id
+            }
+            
+            async with session.post(self.API_URL, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    result = data.get("result", {})
+                    
+                    # Extract progress (0.0-1.0)
+                    progress = result.get("watched", 0.0)
+                    if isinstance(progress, (int, float)):
+                        progress = float(progress)
+                    else:
+                        progress = 0.0
+                    
+                    # Cache for 1 hour
+                    await self.cache.set(cache_key, progress, ttl=3600)
+                    return progress
+                else:
+                    logger.debug(f"Stremio progress fetch returned {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.debug(f"Error fetching progress for {imdb_id}: {e}")
+            return None
+    
+    async def filter_by_progress(
+        self, auth_key: str, imdb_ids: List[str], min_progress: float = 0.5
+    ) -> List[str]:
+        """
+        Filter items by watch progress threshold
+        
+        Args:
+            auth_key: Stremio authentication key
+            imdb_ids: List of IMDB IDs to filter
+            min_progress: Minimum progress required (0-1)
+            
+        Returns:
+            Filtered list of IMDB IDs
+        """
+        filtered = []
+        
+        for imdb_id in imdb_ids:
+            try:
+                progress = await self.fetch_watched_progress(auth_key, imdb_id)
+                if progress is not None and progress >= min_progress:
+                    filtered.append(imdb_id)
+            except Exception as e:
+                logger.debug(f"Error filtering {imdb_id}: {e}")
+                # Fall back to including the item if we can't fetch progress
+                filtered.append(imdb_id)
+        
+        return filtered
+
