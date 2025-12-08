@@ -149,13 +149,10 @@ async def test_cache_complex_data():
         await cache.close()
 
 
-@pytest.mark.asyncio
-async def test_cache_singleton():
+def test_cache_singleton():
     """Test CacheManager is a singleton"""
     from app.services.cache import CacheManager
     cache1 = CacheManager()
     cache2 = CacheManager()
     
     assert cache1 is cache2
-    
-    await cache1.close()
