@@ -33,7 +33,29 @@ class RecommendationEngine:
         await self.mdblist.close()
         await self.stremio.close()
     
-    async def get_seed_items(self) -> List[str]:
+    async def _filter_imdb_ids_by_media_type(
+        self,
+        imdb_ids: List[str],
+        media_type: Optional[str],
+    ) -> List[str]:
+        """Filter a list of IMDB IDs to those matching the requested media type."""
+        if not media_type:
+            return imdb_ids
+
+        tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type)
+        if not tmdb_type:
+            return imdb_ids
+
+        tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in imdb_ids]
+        resolved = await asyncio.gather(*tasks, return_exceptions=True)
+
+        filtered: List[str] = []
+        for imdb_id, tmdb_data in zip(imdb_ids, resolved):
+            if isinstance(tmdb_data, dict) and tmdb_data.get("media_type") == tmdb_type:
+                filtered.append(imdb_id)
+        return filtered
+
+    async def get_seed_items(self, media_type: Optional[str] = None) -> List[str]:
         """
         Get seed items for recommendations (loved items or watch history)
         
@@ -45,7 +67,7 @@ class RecommendationEngine:
             logger.warning("No valid Stremio auth key available; skipping seed fetch")
             return []
         self.config.stremio_auth_key = auth_key
-        cache_key = f"user:{auth_key}:seeds"
+        cache_key = f"user:{auth_key}:seeds:{media_type or 'all'}"
 
         async def build_seeds() -> List[str]:
             seeds: List[str] = []
@@ -53,27 +75,36 @@ class RecommendationEngine:
             # 1) Try loved items via official liked addon if enabled
             if self.config.use_loved_items:
                 logger.debug("Fetching loved catalogs in parallel...")
-                loved_movies_task = self.stremio.fetch_loved_catalog("movie", token=self.config.stremio_loved_token)
-                loved_series_task = self.stremio.fetch_loved_catalog("series", token=self.config.stremio_loved_token)
-                loved_movies, loved_series = await asyncio.gather(loved_movies_task, loved_series_task)
-                logger.debug(
-                    "  Loved items fetched: %s movies, %s series",
-                    len(loved_movies or []),
-                    len(loved_series or []),
-                )
-                loved = (loved_movies + loved_series)[: settings.MAX_SEEDS]
+                loved_tasks = []
+                if media_type in (None, "movie"):
+                    loved_tasks.append(self.stremio.fetch_loved_catalog("movie", token=self.config.stremio_loved_token))
+                if media_type in (None, "series"):
+                    loved_tasks.append(self.stremio.fetch_loved_catalog("series", token=self.config.stremio_loved_token))
+
+                loved_results = await asyncio.gather(*loved_tasks)
+                loved = [item for sub in loved_results for item in (sub or [])]
+
+                if media_type:
+                    loved = await self._filter_imdb_ids_by_media_type(loved, media_type)
+
+                loved = loved[: settings.MAX_SEEDS]
                 if loved:
-                    seeds = loved
+                    seeds.extend(loved)
                     logger.info(f"Using {len(seeds)} loved items as seeds")
 
             # 2) Fallback to library watch history
-            if not seeds:
-                logger.debug("No loved items found, fetching library watch history...")
-                library = await self.stremio.fetch_library(auth_key)
-                logger.debug("  Library fetched")
-                recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS)
-                seeds = recent
-                logger.info(f"Using {len(seeds)} recently watched items as seeds")
+            library = await self.stremio.fetch_library(auth_key)
+            logger.debug("  Library fetched")
+            recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS * 2)
+            if media_type:
+                recent = await self._filter_imdb_ids_by_media_type(recent, media_type)
+            # Always append watched items to diversify seeds (even when loved exist)
+            for imdb_id in recent:
+                if imdb_id not in seeds:
+                    seeds.append(imdb_id)
+            seeds = seeds[: settings.MAX_SEEDS]
+            if recent:
+                logger.info(f"Using {len(seeds)} recently watched items as seeds (after merge)")
 
             return seeds
 
@@ -430,7 +461,7 @@ class RecommendationEngine:
 
         # Get seed items and watched list in parallel
         logger.debug("Fetching seed items and watched list...")
-        seeds_task = self.get_seed_items()
+        seeds_task = self.get_seed_items(media_type)
         watched_task = self.get_watched_items()
 
         seeds, watched = await asyncio.gather(seeds_task, watched_task)
