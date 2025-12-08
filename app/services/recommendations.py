@@ -375,6 +375,9 @@ class RecommendationEngine:
         
         seeds, watched = await asyncio.gather(seeds_task, watched_task)
         logger.debug(f"  Seeds: {len(seeds)} items, Watched: {len(watched)} items")
+        if seeds:
+            seed_preview = seeds[:10]
+            logger.info(f"Seed IMDB IDs (up to 10): {seed_preview}")
         
         if not seeds:
             logger.warning("No seed items found for recommendations")
@@ -415,6 +418,17 @@ class RecommendationEngine:
             logger.debug(f"  Filtered to {len(ranked)} {media_type}s")
         
         # Cache results
+        if ranked:
+            top_preview = []
+            for item in ranked[:10]:
+                external_ids = item.get("external_ids", {})
+                imdb_id = external_ids.get("imdb_id") or item.get("imdb_id") or item.get("id")
+                title = item.get("title") or item.get("name") or "<unknown>"
+                score = round(item.get("score", 0.0), 3)
+                media_type_val = item.get("media_type")
+                top_preview.append(f"{imdb_id}|{title}|{media_type_val}|score={score}")
+            logger.info(f"Top recommendations preview (up to 10): {top_preview}")
+
         await self.cache.set(cache_key, ranked, ttl=settings.CACHE_TTL_CATALOG)
         logger.info(f"Generated {len(ranked)} recommendations (cached with TTL {settings.CACHE_TTL_CATALOG}s)")
         

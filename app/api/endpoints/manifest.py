@@ -2,12 +2,13 @@
 Manifest Endpoint
 Returns the Stremio addon manifest with dynamic catalogs
 """
+import json
+import logging
 from fastapi import APIRouter, HTTPException, Path, Response
 from app.models.stremio import Manifest, ManifestCatalog
 from app.utils.token import decode_config
 from app.services.stremio import StremioClient
 from app.services.tmdb import TMDBClient
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -59,6 +60,16 @@ async def get_manifest(
     if config.include_movies:
         # Prefer loved seeds first, then fall back to recent watches
         seeds_for_movies = (loved_movies or []) + ([w for w in recent_watches if w not in loved_movies] if recent_watches else [])
+        if loved_movies:
+            loved_preview = json.dumps(loved_movies[: config.num_rows], separators=(",", ":"))
+            logger.info(f"Because you loved (movies) seeds preview: {loved_preview}")
+        watched_only = [w for w in recent_watches if w not in loved_movies] if recent_watches else []
+        if watched_only:
+            watched_preview = json.dumps(watched_only[: config.num_rows], separators=(",", ":"))
+            logger.info(f"Because you watched (movies) seeds preview: {watched_preview}")
+        if seeds_for_movies:
+            combined_preview = json.dumps(seeds_for_movies[: config.num_rows], separators=(",", ":"))
+            logger.info(f"Movies catalog seeds (combined) preview: {combined_preview}")
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_movies):
@@ -94,6 +105,16 @@ async def get_manifest(
     if config.include_series:
         # Prefer loved seeds first, then fall back to recent watches
         seeds_for_series = (loved_series or []) + ([w for w in recent_watches if w not in loved_series] if recent_watches else [])
+        if loved_series:
+            loved_preview = json.dumps(loved_series[: config.num_rows], separators=(",", ":"))
+            logger.info(f"Because you loved (series) seeds preview: {loved_preview}")
+        watched_only_series = [w for w in recent_watches if w not in loved_series] if recent_watches else []
+        if watched_only_series:
+            watched_preview = json.dumps(watched_only_series[: config.num_rows], separators=(",", ":"))
+            logger.info(f"Because you watched (series) seeds preview: {watched_preview}")
+        if seeds_for_series:
+            combined_preview = json.dumps(seeds_for_series[: config.num_rows], separators=(",", ":"))
+            logger.info(f"Series catalog seeds (combined) preview: {combined_preview}")
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_series):
