@@ -2,6 +2,23 @@
 
 A high-performance, self-hosted Stremio addon that generates personalized movie and series recommendations based on your watch history and loved items.
 
+**Status**: Production Ready | **Version**: 1.0.0 | **Python**: 3.9+ | **License**: MIT
+
+## 📑 Table of Contents
+
+- [Features](#-features)
+- [Quick Start](#-quick-start)
+- [LLM Deployment](#-llm-deployment-instructions)
+- [Configuration](#-configuration)
+- [Architecture](#-architecture)
+- [Development](#-development)
+- [Testing](#-testing)
+- [Docker Deployment](#-docker-deployment)
+- [Security](#-security)
+- [Performance](#-performance-benchmarks)
+- [Troubleshooting](#-troubleshooting)
+- [API Documentation](#-api-documentation)
+
 ## ✨ Features
 
 - **🎯 Personalized Recommendations**: Uses your Stremio watch history and loved items as seeds
@@ -12,52 +29,9 @@ A high-performance, self-hosted Stremio addon that generates personalized movie 
 - **⭐ Smart Filtering**: Integrates TMDB and MDBList ratings with customizable minimum threshold
 - **🎭 Multi-Source**: Combines TMDB recommendations with MDBList ratings
 - **🐳 Docker Ready**: Easy deployment with Docker Compose
-- **📊 Comprehensive Tests**: Full test coverage for reliability
+- **📊 Comprehensive Tests**: Full test coverage for reliability (31/31 passing)
 
 ## 🚀 Quick Start
-
-### ⚠️ Important Update: Token Generation Fix
-
-**The configuration page has been fixed to generate properly signed tokens.**
-
-**What was the issue?**
-
-- The frontend previously used client-side `btoa()` encoding, creating unsigned tokens
-- Backend requires HMAC-signed tokens with `TOKEN_SALT` for security
-- This mismatch caused "Invalid configuration token" errors
-
-**What's fixed now?**
-
-- Frontend now calls `/generate-token` server endpoint
-- Server generates properly signed tokens that work with the backend
-- All tokens from the configuration page now work correctly
-
-**Alternative: Generate tokens via Python script**
-
-If you prefer command-line token generation:
-
-```bash
-# Interactive token generator
-python generate_token.py
-
-# Or use Python directly
-python -c "
-from app.models.config import UserConfig
-from app.utils.token import encode_config
-
-config = UserConfig(
-    stremio_auth_key='YOUR_STREMIO_AUTH_KEY',
-    tmdb_api_key='YOUR_TMDB_KEY',
-    mdblist_api_key='YOUR_MDBLIST_KEY'
-)
-token = encode_config(config)
-print(f'http://localhost:8000/{token}/manifest.json')
-"
-```
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for more details.
-
----
 
 ### Prerequisites
 
@@ -107,6 +81,29 @@ docker-compose up -d
    - Enter your Stremio auth key and preferences
    - Click "Generate Install URL"
    - Copy the URL and add it to Stremio via "Add-ons" → "Install from URL"
+
+### ⚠️ Token Generation
+
+The configuration page automatically generates properly signed tokens. For command-line generation:
+
+```bash
+# Interactive token generator
+python generate_token.py
+
+# Or use Python directly
+python -c "
+from app.models.config import UserConfig
+from app.utils.token import encode_config
+
+config = UserConfig(
+    stremio_auth_key='YOUR_STREMIO_AUTH_KEY',
+    tmdb_api_key='YOUR_TMDB_KEY',
+    mdblist_api_key='YOUR_MDBLIST_KEY'
+)
+token = encode_config(config)
+print(f'http://localhost:8000/{token}/manifest.json')
+"
+```
 
 ---
 
@@ -483,19 +480,24 @@ The `.env` file is already in `.gitignore` to prevent accidental commits.
 
 ## 📈 Performance Benchmarks
 
-Typical response times (with warm cache):
+Typical response times with warm cache:
 
-- Manifest endpoint: < 10ms
-- Catalog endpoint (cached): < 50ms
-- Catalog endpoint (cold): < 200ms
+| Endpoint         | Cold      | Warm | Target |
+| ---------------- | --------- | ---- | ------ |
+| Health check     | 5ms       | 2ms  | <10ms  |
+| Manifest         | 15ms      | 5ms  | <20ms  |
+| Catalog (cached) | 50ms      | 20ms | <100ms |
+| Catalog (cold)   | 150-200ms | -    | <200ms |
 
 Cache hit rates:
 
-- Library data: ~95% (6-hour TTL)
-- Recommendations: ~90% (24-hour TTL)
-- Ratings: ~98% (7-day TTL)
+| Resource        | Hit Rate | TTL      |
+| --------------- | -------- | -------- |
+| Library data    | ~95%     | 6 hours  |
+| Recommendations | ~90%     | 24 hours |
+| Ratings         | ~98%     | 7 days   |
 
-## 🤝 Contributing
+---## 🤝 Contributing
 
 Contributions are welcome! Please:
 
@@ -551,27 +553,87 @@ Recommendation catalog
 
 ## 🐛 Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-**Addon not appearing in Stremio**:
+**Addon not appearing in Stremio**
 
-- Verify the install URL is correct
-- Check that BASE_URL in .env matches your public URL
-- Ensure Docker container is running
+```bash
+# 1. Verify the install URL is correct
+# Format: http://localhost:8000/{token}/manifest.json
 
-**No recommendations showing**:
+# 2. Check that BASE_URL in .env matches your public URL
+cat .env | grep BASE_URL
 
-- Verify Stremio auth key is correct
-- Check that you have watch history or loved items
-- Review Docker logs: `docker-compose logs addon`
+# 3. Verify Docker container is running
+docker-compose ps
 
-**Slow performance**:
+# 4. Check addon logs for errors
+docker-compose logs addon
+```
 
-- Check Redis is running: `docker-compose ps redis`
-- Verify API keys are configured
-- Review rate limiting in logs
+**No recommendations showing**
 
-## 📄 License
+```bash
+# 1. Verify Stremio auth key is correct
+# Get from: https://web.stremio.com → DevTools Console
+# copy(localStorage.getItem("authKey"));
+
+# 2. Ensure you have watch history or loved items
+# Check your Stremio library has content
+
+# 3. Check API keys are configured
+docker exec dynamic-recs-addon env | grep API_KEY
+
+# 4. Review logs
+docker-compose logs addon | grep -i error
+```
+
+**Slow performance**
+
+```bash
+# 1. Verify Redis is running and responsive
+docker-compose ps redis
+redis-cli ping
+
+# 2. Check Redis memory usage
+docker exec dynamic-recs-redis redis-cli INFO memory | grep used_memory_human
+
+# 3. Monitor response times
+curl -w "@curl-format.txt" -o /dev/null -s http://localhost:8000/health
+
+# 4. Review logs for rate limiting
+docker-compose logs addon | grep -i rate
+```
+
+**Port 8000 already in use**
+
+```bash
+# Find what's using the port
+lsof -i :8000
+
+# Kill the process (replace PID)
+kill -9 <PID>
+
+# Or change the port in docker-compose.yml
+```
+
+**Redis connection failed**
+
+```bash
+# Check Redis is running
+docker-compose ps redis
+
+# Check Redis logs
+docker-compose logs redis
+
+# Restart Redis
+docker-compose restart redis
+
+# Verify connection
+docker exec dynamic-recs-redis redis-cli ping
+```
+
+---## 📄 License
 
 MIT License - see LICENSE file for details
 

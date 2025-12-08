@@ -1,41 +1,19 @@
-# 🤖 LLM Deployment Guide for Dynamic Recommendations
+# 🤖 Deployment Guide for Dynamic Recommendations
 
-**Automated deployment instructions for AI agents and LLMs deploying this Stremio addon via terminal.**
+**Complete deployment instructions for deploying the Stremio addon via Docker, Docker Compose, or local development.**
 
----
+## 📑 Table of Contents
 
-## ⚠️ IMPORTANT: Token Generation Fix
-
-**The web configuration page (`/configure`) has been updated to generate properly signed tokens.**
-
-### What Changed?
-
-- **OLD BEHAVIOR**: Frontend used `btoa()` client-side, creating unsigned base64 tokens
-- **NEW BEHAVIOR**: Frontend calls `/generate-token` endpoint for server-signed tokens with HMAC
-- **RESULT**: All tokens from the web UI now work correctly with the backend
-
-### Alternative: Generate Tokens via Script
-
-For command-line token generation or automation:
-
-```bash
-# Interactive token generator
-python generate_token.py
-
-# Or use Python directly
-python -c "
-from app.models.config import UserConfig
-from app.utils.token import encode_config
-
-config = UserConfig(
-    stremio_auth_key='YOUR_STREMIO_AUTH_KEY',
-    tmdb_api_key='YOUR_TMDB_KEY',
-    mdblist_api_key='YOUR_MDBLIST_KEY'
-)
-token = encode_config(config)
-print(f'http://localhost:8000/{token}/manifest.json')
-"
-```
+- [Prerequisites](#prerequisites)
+- [Quick Start (Docker Compose)](#quick-start-docker-compose)
+- [Step-by-Step Deployment](#step-by-step-deployment)
+- [Token Generation](#token-generation)
+- [Docker Configuration](#docker-configuration)
+- [Local Development](#local-development)
+- [Production Deployment](#production-deployment)
+- [Monitoring & Troubleshooting](#monitoring--troubleshooting)
+- [Performance Tuning](#performance-tuning)
+- [Quick Reference](#quick-reference)
 
 ---
 
@@ -49,33 +27,64 @@ print(f'http://localhost:8000/{token}/manifest.json')
 
 ---
 
-## Step 1: Setup Environment
+## Quick Start (Docker Compose)
+
+The fastest way to get running in 2 minutes:
 
 ```bash
-# Navigate to project directory
-cd /path/to/dynamic-recs
+# Clone repository
+git clone <repository-url> && cd dynamic-recs
 
-# Create .env file from example
+# Generate secure token salt
+TOKEN_SALT=$(python -c "import secrets; print(secrets.token_hex(32))")
+
+# Create .env file
 cp .env.example .env
+echo "TOKEN_SALT=$TOKEN_SALT" >> .env
+echo "BASE_URL=http://localhost:8000" >> .env
 
-# Generate secure token salt and update .env
-TOKEN=$(python -c "import secrets; print(secrets.token_hex(32))")
-sed -i.bak "s/TOKEN_SALT=.*/TOKEN_SALT=$TOKEN/" .env
+# Start services
+docker-compose up -d
 
-# Update BASE_URL if deploying to production
-# sed -i.bak "s|BASE_URL=.*|BASE_URL=https://your-domain.com|" .env
+# Wait for services
+sleep 5
 
-# Add API keys (replace with actual keys)
-sed -i.bak "s/TMDB_API_KEY=.*/TMDB_API_KEY=your_actual_tmdb_key/" .env
-sed -i.bak "s/MDBLIST_API_KEY=.*/MDBLIST_API_KEY=your_actual_mdblist_key/" .env
+# Verify health
+curl http://localhost:8000/health | jq
 
-# Remove backup files
-rm .env.bak
+# Open configuration
+echo "✅ Configure at: http://localhost:8000/configure"
 ```
 
 ---
 
-## Step 2: Verify Docker Installation
+## Step-by-Step Deployment
+
+### Step 1: Clone & Setup
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd dynamic-recs
+```
+
+### Step 2: Configure Environment
+
+```bash
+# Create .env file from example
+cp .env.example .env
+
+# Generate secure token salt
+TOKEN_SALT=$(python -c "import secrets; print(secrets.token_hex(32))")
+echo "TOKEN_SALT=$TOKEN_SALT" >> .env
+echo "BASE_URL=http://localhost:8000" >> .env
+
+# Add API keys (replace with actual keys)
+echo "TMDB_API_KEY=your_actual_tmdb_key" >> .env
+echo "MDBLIST_API_KEY=your_actual_mdblist_key" >> .env
+```
+
+### Step 3: Verify Docker Installation
 
 ```bash
 # Check Docker is installed
@@ -88,7 +97,7 @@ docker ps || echo "❌ Docker daemon not running - start Docker Desktop"
 
 ---
 
-## Step 3: Deploy with Docker Compose
+## Step 4: Deploy with Docker Compose
 
 ```bash
 # Build and start containers in detached mode
@@ -114,7 +123,7 @@ dynamic-recs-redis       redis:7-alpine           Up (healthy)
 
 ---
 
-## Step 4: Verify Deployment
+## Step 5: Verify Deployment
 
 ```bash
 # Wait for services to be healthy (max 30 seconds)
@@ -144,7 +153,7 @@ echo "✅ Health endpoint: http://localhost:8000/health"
 
 ---
 
-## Step 5: Monitor and Troubleshoot
+## Step 6: Monitor and Troubleshoot
 
 ### View Logs
 
@@ -190,6 +199,53 @@ docker-compose down
 
 # Stop and remove all data
 docker-compose down -v
+```
+
+---
+
+## Token Generation
+
+### Web-Based (Easiest)
+
+Navigate to `http://localhost:8000/configure` and:
+
+1. Enter your Stremio auth key
+2. Add optional API keys (TMDB, MDBList)
+3. Click "Generate Install URL"
+4. Copy and use the generated URL
+
+### Command-Line (Automation)
+
+```bash
+# Interactive token generator
+python generate_token.py
+
+# Or use Python directly
+python -c "
+from app.models.config import UserConfig
+from app.utils.token import encode_config
+
+config = UserConfig(
+    stremio_auth_key='YOUR_STREMIO_AUTH_KEY',
+    tmdb_api_key='YOUR_TMDB_KEY',
+    mdblist_api_key='YOUR_MDBLIST_KEY'
+)
+token = encode_config(config)
+print(f'http://localhost:8000/{token}/manifest.json')
+"
+```
+
+### API Endpoint
+
+```bash
+# POST request to generate token
+curl -X POST http://localhost:8000/generate-token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stremio_auth_key": "your_auth_key",
+    "tmdb_api_key": "your_tmdb_key",
+    "mdblist_api_key": "your_mdblist_key"
+  }'
 ```
 
 ---
@@ -249,7 +305,59 @@ pytest tests/ -v --cov=app --cov-report=html
 
 ---
 
-## Production Deployment
+## Docker Configuration
+
+### docker-compose.yml Overview
+
+```yaml
+version: "3.8"
+
+services:
+  addon:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - TOKEN_SALT=${TOKEN_SALT}
+      - BASE_URL=${BASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - MDBLIST_API_KEY=${MDBLIST_API_KEY}
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+### Environment Variables
+
+| Variable                    | Description                     | Required                     | Example                   |
+| --------------------------- | ------------------------------- | ---------------------------- | ------------------------- |
+| `TOKEN_SALT`                | Secret for token signing (HMAC) | ✅ Yes                       | `$(openssl rand -hex 32)` |
+| `BASE_URL`                  | Public URL of addon             | ✅ Yes                       | `http://localhost:8000`   |
+| `REDIS_URL`                 | Redis connection URL            | ✅ Yes                       | `redis://redis:6379`      |
+| `TMDB_API_KEY`              | TMDB API key                    | ❌ Optional                  | Get from themoviedb.org   |
+| `MDBLIST_API_KEY`           | MDBList API key                 | ❌ Optional                  | Get from mdblist.com      |
+| `CACHE_WARM_INTERVAL_HOURS` | Cache warming interval          | ❌ Optional (default: 3)     | `3`                       |
+| `DEBUG`                     | Debug mode                      | ❌ Optional (default: False) | `False`                   |
+| `LOG_LEVEL`                 | Logging level                   | ❌ Optional (default: INFO)  | `INFO`                    |
+
+---
 
 ### Pre-Deployment Checklist
 
@@ -308,9 +416,30 @@ server {
 
 ---
 
-## Health Check Endpoints
+---
 
-### Available Endpoints
+## Monitoring & Troubleshooting
+
+### View Logs
+
+```bash
+# View all service logs
+docker-compose logs
+
+# View addon logs only (follow mode)
+docker-compose logs -f addon
+
+# View last 50 lines
+docker-compose logs --tail=50 addon
+
+# View specific timeframe
+docker-compose logs --since 10m addon
+
+# Search logs for errors
+docker-compose logs addon | grep -i error
+```
+
+### Health Checks
 
 - `GET /health` - Service health status
 - `GET /configure` - Configuration UI
@@ -330,11 +459,45 @@ curl http://localhost:8000/health | jq
 watch -n 5 'curl -s http://localhost:8000/health | jq'
 ```
 
----
+### Health Checks
 
-## Troubleshooting
+**Available Endpoints**
 
-### Common Issues
+- `GET /health` - Service health status
+- `GET /configure` - Configuration UI
+- `GET /{token}/manifest.json` - Addon manifest (requires valid token)
+- `GET /{token}/catalog/{type}/{id}.json` - Catalog endpoint
+
+**Test Health Endpoint**
+
+```bash
+# Simple health check
+curl http://localhost:8000/health | jq
+
+# Check container health
+docker-compose ps
+
+# Verbose health check with timing
+time curl -i http://localhost:8000/health
+
+# Monitor continuously
+watch -n 5 'curl -s http://localhost:8000/health | jq'
+```
+
+### Container Status
+
+```bash
+# List all services
+docker-compose ps
+
+# Check resource usage
+docker stats
+
+# Inspect addon logs
+docker-compose logs -f --tail=100 addon
+```
+
+### Troubleshooting
 
 **1. Port 8000 already in use**
 
@@ -440,106 +603,218 @@ docker exec dynamic-recs-redis redis-cli SAVE
 docker cp dynamic-recs-redis:/data/dump.rdb ./backup-$(date +%Y%m%d).rdb
 ```
 
----
-
 ## Performance Tuning
 
 ### Monitor Resource Usage
 
 ```bash
-# Real-time stats
+# Real-time container stats
 docker stats
 
-# Check container resource limits
-docker inspect dynamic-recs-addon | jq '.[0].HostConfig.Memory'
+# Check specific container
+docker stats dynamic-recs-addon
+
+# Monitor with interval
+watch -n 2 'docker stats --no-stream'
 ```
 
-### Optimize Redis
+### Redis Optimization
 
 ```bash
 # Check Redis memory usage
 docker exec dynamic-recs-redis redis-cli INFO memory
 
-# Set max memory (if needed)
+# Check key count
+docker exec dynamic-recs-redis redis-cli DBSIZE
+
+# Monitor Redis commands
+docker exec dynamic-recs-redis redis-cli MONITOR
+
+# Analyze memory by key type
+docker exec dynamic-recs-redis redis-cli --latency
+
+# Set max memory policy (evict least recently used)
 docker exec dynamic-recs-redis redis-cli CONFIG SET maxmemory 256mb
 docker exec dynamic-recs-redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
 ```
 
-### Check API Response Times
+### API Response Time Testing
 
 ```bash
-# Test manifest endpoint (replace TOKEN with actual token)
-time curl -s http://localhost:8000/TOKEN/manifest.json > /dev/null
+# Test manifest endpoint (replace {TOKEN})
+curl -w "Time: %{time_total}s\nCode: %{http_code}\n" \
+  -o /dev/null -s http://localhost:8000/{TOKEN}/manifest.json
 
-# Test catalog endpoint
-time curl -s http://localhost:8000/TOKEN/catalog/movie/dynamic_movies_0.json > /dev/null
+# Test catalog endpoint (replace {TOKEN})
+time curl -s http://localhost:8000/{TOKEN}/catalog/movie/dynamic_movies_0.json > /dev/null
+
+# Batch test with Apache Bench
+ab -n 100 -c 10 http://localhost:8000/{TOKEN}/manifest.json
 ```
 
----
+### Docker Container Optimization
 
-## Success Indicators
+```bash
+# View current resource limits
+docker inspect dynamic-recs-addon | jq '.[0].HostConfig | {Memory, MemorySwap, CpuShares}'
 
-✅ **Deployment Successful When:**
+# Set memory limit
+# Edit docker-compose.yml and add:
+# deploy:
+#   resources:
+#     limits:
+#       memory: 512M
+#     reservations:
+#       memory: 256M
 
-- Health endpoint returns 200 status
-- Configuration page loads successfully
-- Docker containers show "Up (healthy)" status
-- No error logs in `docker-compose logs`
-- Redis connection established
-- Port 8000 accessible
+# Rebuild with new limits
+docker-compose up -d --build
+```
 
-✅ **Ready for Production When:**
+### Cache Optimization
 
-- All tests passing
-- SSL certificate configured
-- Reverse proxy working
-- Monitoring alerts configured
-- Backup strategy implemented
-- Rate limiting active
+```bash
+# Check cache hit rates
+docker-compose logs addon | grep -i "cache\|hit\|miss"
 
----
+# Clear and rebuild cache
+docker exec dynamic-recs-redis redis-cli FLUSHALL
+docker-compose restart addon
+
+# Monitor cache warming
+docker-compose logs -f addon | grep -i "warming\|refresh"
+```
 
 ## Quick Reference
 
-### One-Line Deploy
+### Essential Commands
 
 ```bash
-cp .env.example .env && python -c "import secrets; print(f\"TOKEN_SALT={secrets.token_hex(32)}\")" >> .env && docker-compose up -d --build && sleep 10 && curl http://localhost:8000/health
-```
+# Start all services
+docker-compose up -d
 
-### One-Line Stop
-
-```bash
+# Stop all services
 docker-compose down
+
+# View logs (all services)
+docker-compose logs -f
+
+# Restart addon
+docker-compose restart addon
+
+# Rebuild after changes
+docker-compose up -d --build
+
+# Check service health
+docker-compose ps
+
+# Monitor resources
+docker stats
+
+# Clean up (remove containers & volumes)
+docker-compose down -v
 ```
 
-### One-Line Restart with Logs
+### One-Liners
 
 ```bash
-docker-compose restart && docker-compose logs -f addon
+# Quick deployment with health check
+cp .env.example .env && \
+TOKEN=$(python -c "import secrets; print(secrets.token_hex(32))") && \
+echo "TOKEN_SALT=$TOKEN" >> .env && \
+echo "BASE_URL=http://localhost:8000" >> .env && \
+docker-compose up -d && \
+sleep 5 && \
+curl http://localhost:8000/health
+
+# Test all endpoints
+TOKEN="your_token_here" && \
+curl http://localhost:8000/health && \
+curl http://localhost:8000/configure && \
+curl http://localhost:8000/$TOKEN/manifest.json
+
+# View real-time logs
+docker-compose logs -f addon
+
+# Clear cache and rebuild
+docker exec dynamic-recs-redis redis-cli FLUSHALL && \
+docker-compose restart addon
+
+# Perform health check with timing
+watch -n 5 'curl -w "Status: %{http_code} | Time: %{time_total}s\n" http://localhost:8000/health'
 ```
 
-### One-Line Health Check
+### Emergency Commands
 
 ```bash
-curl -sf http://localhost:8000/health && echo "✅ Healthy" || echo "❌ Unhealthy"
+# Force stop all containers
+docker-compose kill
+
+# Reset everything (WARNING: removes data)
+docker-compose down -v && docker-compose up -d --build
+
+# View addon logs for errors
+docker-compose logs addon | grep -E "(error|ERROR|Exception)"
+
+# SSH into addon container
+docker-compose exec addon /bin/bash
+
+# Force restart Redis
+docker-compose restart redis && sleep 2 && docker-compose restart addon
 ```
 
 ---
 
-## Support
+## Frequently Asked Questions
 
-For issues or questions:
+**Q: Are API keys required?**
+A: TMDB and MDBList keys are optional but recommended for better recommendations and ratings.
 
-- Check logs: `docker-compose logs addon`
-- Review environment: `cat .env`
-- Verify Docker: `docker-compose ps`
-- Test endpoints manually with curl
-- Review README.md for full documentation
+**Q: Is Redis required?**
+A: Yes, Redis is essential for caching and performance. It must be running for the addon to function.
 
-**Common Questions:**
+**Q: Can I run without Docker?**
+A: Yes, follow the Local Development section. You'll need Python 3.9+ and Redis running separately.
 
-- API keys required: Yes, both TMDB and MDBList
-- Redis required: Yes, for caching
-- Docker required: Yes (or run locally with Python)
-- Stremio auth key: Get from web.stremio.com console
+**Q: How do I get my Stremio auth key?**
+A: Open https://web.stremio.com → DevTools Console → `copy(localStorage.getItem("authKey"))`
+
+**Q: Can I self-host on a Raspberry Pi?**
+A: Yes, it should work fine. Adjust resource limits in docker-compose.yml as needed.
+
+**Q: How often should I restart services?**
+A: Only when deploying updates or if experiencing issues. Let Docker manage restart policies.
+
+**Q: Can I backup my Redis data?**
+A: Yes, use the backup commands in the Maintenance section. You can also enable persistence in redis.conf.
+
+---
+
+## Support & Resources
+
+For issues and questions:
+
+- **Logs**: `docker-compose logs addon`
+- **Environment**: `cat .env`
+- **Docker Status**: `docker-compose ps`
+- **Test Endpoint**: `curl http://localhost:8000/health`
+- **Full Docs**: See README.md
+
+**Helpful Commands:**
+
+```bash
+# Diagnose issues
+docker-compose logs addon | tail -50
+docker exec dynamic-recs-addon env
+docker-compose ps
+docker stats
+
+# Get help
+cat .env
+docker-compose logs --help
+curl --help
+```
+
+---
+
+**Last Updated**: December 2024 | **Version**: 1.0.0
