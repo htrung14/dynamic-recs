@@ -40,44 +40,53 @@ class RecommendationEngine:
         Returns:
             List of IMDB IDs to use as seeds
         """
-        cache_key = f"user:{self.config.stremio_auth_key}:seeds"
-        
-        # Check cache first
-        cached = await self.cache.get(cache_key)
-        if cached:
-            logger.debug(f"Seeds found in cache: {len(cached)} items")
-            return cached
+        auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            logger.warning("No valid Stremio auth key available; skipping seed fetch")
+            return []
+        self.config.stremio_auth_key = auth_key
+        cache_key = f"user:{auth_key}:seeds"
 
-        seeds: List[str] = []
+        async def build_seeds() -> List[str]:
+            seeds: List[str] = []
 
-        # 1) Try loved items via official liked addon if enabled
-        if self.config.use_loved_items:
-            logger.debug("Fetching loved catalog (movies)...")
-            loved_movies = await self.stremio.fetch_loved_catalog("movie", token=self.config.stremio_loved_token)
-            logger.debug(f"  Found {len(loved_movies) if loved_movies else 0} loved movies")
-            logger.debug("Fetching loved catalog (series)...")
-            loved_series = await self.stremio.fetch_loved_catalog("series", token=self.config.stremio_loved_token)
-            logger.debug(f"  Found {len(loved_series) if loved_series else 0} loved series")
-            loved = (loved_movies + loved_series)[: settings.MAX_SEEDS]
-            if loved:
-                seeds = loved
-                logger.info(f"Using {len(seeds)} loved items as seeds")
+            # 1) Try loved items via official liked addon if enabled
+            if self.config.use_loved_items:
+                logger.debug("Fetching loved catalogs in parallel...")
+                loved_movies_task = self.stremio.fetch_loved_catalog("movie", token=self.config.stremio_loved_token)
+                loved_series_task = self.stremio.fetch_loved_catalog("series", token=self.config.stremio_loved_token)
+                loved_movies, loved_series = await asyncio.gather(loved_movies_task, loved_series_task)
+                logger.debug(
+                    "  Loved items fetched: %s movies, %s series",
+                    len(loved_movies or []),
+                    len(loved_series or []),
+                )
+                loved = (loved_movies + loved_series)[: settings.MAX_SEEDS]
+                if loved:
+                    seeds = loved
+                    logger.info(f"Using {len(seeds)} loved items as seeds")
 
-        # 2) Fallback to library watch history
-        if not seeds:
-            logger.debug("No loved items found, fetching library watch history...")
-            library = await self.stremio.fetch_library(self.config.stremio_auth_key)
-            logger.debug(f"  Library fetched")
-            recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS)
-            seeds = recent
-            logger.info(f"Using {len(seeds)} recently watched items as seeds")
+            # 2) Fallback to library watch history
+            if not seeds:
+                logger.debug("No loved items found, fetching library watch history...")
+                library = await self.stremio.fetch_library(auth_key)
+                logger.debug("  Library fetched")
+                recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS)
+                seeds = recent
+                logger.info(f"Using {len(seeds)} recently watched items as seeds")
 
-        # Cache seeds
+            return seeds
+
+        seeds = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build_seeds,
+            ttl=settings.CACHE_TTL_LIBRARY,
+            stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
+        )
+
         if seeds:
-            await self.cache.set(cache_key, seeds, ttl=settings.CACHE_TTL_LIBRARY)
-            logger.debug(f"Seeds cached with TTL {settings.CACHE_TTL_LIBRARY}s")
-
-        return seeds
+            logger.debug(f"Seeds served via SWR: {len(seeds)} items")
+        return seeds or []
     
     async def get_watched_items(self) -> List[str]:
         """
@@ -86,22 +95,24 @@ class RecommendationEngine:
         Returns:
             List of IMDB IDs that user has watched
         """
-        cache_key = f"user:{self.config.stremio_auth_key}:watched"
-        
-        # Check cache first
-        cached = await self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        # Fetch library
-        library = await self.stremio.fetch_library(self.config.stremio_auth_key)
-        watched = self.stremio.extract_watched_items(library)
-        
-        # Cache watched list
-        if watched:
-            await self.cache.set(cache_key, watched, ttl=settings.CACHE_TTL_LIBRARY)
-        
-        return watched
+        auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            logger.warning("No valid Stremio auth key available; skipping watched fetch")
+            return []
+        self.config.stremio_auth_key = auth_key
+        cache_key = f"user:{auth_key}:watched"
+
+        async def build_watched() -> List[str]:
+            library = await self.stremio.fetch_library(auth_key)
+            watched = self.stremio.extract_watched_items(library)
+            return watched
+        watched = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build_watched,
+            ttl=settings.CACHE_TTL_LIBRARY,
+            stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
+        )
+        return watched or []
     
     async def fetch_recommendations_for_seeds(
         self,
@@ -119,10 +130,12 @@ class RecommendationEngine:
         # Convert IMDB IDs to TMDB IDs
         tmdb_items = []
         seed_genres: Set[int] = set()
-        
-        for imdb_id in seeds:
-            tmdb_data = await self.tmdb.find_by_imdb_id(imdb_id)
-            if tmdb_data:
+
+        # Resolve IMDB -> TMDB in parallel to minimize latency
+        tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in seeds]
+        resolved = await asyncio.gather(*tasks, return_exceptions=True)
+        for tmdb_data in resolved:
+            if isinstance(tmdb_data, dict):
                 tmdb_items.append(tmdb_data)
 
         # Enrich seeds with genres to guide similarity scoring
@@ -367,65 +380,28 @@ class RecommendationEngine:
             return []
         self.config.stremio_auth_key = auth_key
         cache_key = f"user:{auth_key}:recs:{media_type or 'all'}"
-        
-        # Check cache first
-        cached = await self.cache.get(cache_key)
-        if cached:
-            logger.debug(f"Recommendations found in cache: {len(cached)} items")
-            return cached
-        
-        logger.debug("Cache miss, generating fresh recommendations...")
-        
-        # Get seed items and watched list in parallel
-        logger.debug("Fetching seed items and watched list...")
-        seeds_task = self.get_seed_items()
-        watched_task = self.get_watched_items()
-        
-        seeds, watched = await asyncio.gather(seeds_task, watched_task)
-        logger.debug(f"  Seeds: {len(seeds)} items, Watched: {len(watched)} items")
-        if seeds:
-            seed_preview = seeds[:10]
-            logger.info(f"Seed IMDB IDs (up to 10): {seed_preview}")
-        
-        if not seeds:
-            logger.warning("No seed items found for recommendations")
-            return []
-        
-        # Fetch recommendations
-        logger.debug(f"Fetching recommendations for {len(seeds)} seed items...")
-        recommendations, seed_genres = await self.fetch_recommendations_for_seeds(seeds)
-        logger.debug(f"  Found {len(recommendations)} candidate recommendations")
-        
-        if not recommendations:
-            logger.info("No recommendations or similars found for seeds; returning empty list")
-            return []
-        
-        # Ensure external_ids/imdb_id present for poster conversion and scoring
-        logger.debug("Attaching external IDs...")
-        recommendations = await self._attach_external_ids(recommendations)
 
-        # Enrich with ratings
-        logger.debug("Enriching with ratings...")
-        enriched = await self.enrich_with_ratings(recommendations)
-        
-        # Score and rank
-        logger.debug("Scoring and ranking recommendations...")
-        ranked = await self.score_and_rank(enriched, watched, seed_genres)
-        logger.debug(f"  Ranked to {len(ranked)} items")
-        
-        # Filter by media type
-        if media_type:
-            type_map = {"movie": "movie", "series": "tv"}
-            tmdb_type = type_map.get(media_type)
-            
-            if tmdb_type:
-                ranked = [
-                    item for item in ranked
-                    if item.get("media_type") == tmdb_type
-                ]
-            logger.debug(f"  Filtered to {len(ranked)} {media_type}s")
-        
-        # Cache results
+        async def build_current() -> List[Dict[str, Any]]:
+            return await self._build_recommendations(media_type, auth_key)
+
+        async def background_refresh() -> List[Dict[str, Any]]:
+            # Use a fresh engine to avoid interfering with the caller's lifecycle
+            clone_config = UserConfig.model_validate(self.config.model_dump())
+            clone_config.stremio_auth_key = auth_key
+            engine = RecommendationEngine(clone_config)
+            try:
+                return await engine._build_recommendations(media_type, auth_key)
+            finally:
+                await engine.close()
+
+        ranked = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build_current,
+            ttl=settings.CACHE_TTL_CATALOG,
+            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
+            refresh_fn=background_refresh,
+        )
+
         if ranked:
             top_preview = []
             for item in ranked[:10]:
@@ -437,7 +413,68 @@ class RecommendationEngine:
                 top_preview.append(f"{imdb_id}|{title}|{media_type_val}|score={score}")
             logger.info(f"Top recommendations preview (up to 10): {top_preview}")
 
-        await self.cache.set(cache_key, ranked, ttl=settings.CACHE_TTL_CATALOG)
-        logger.info(f"Generated {len(ranked)} recommendations (cached with TTL {settings.CACHE_TTL_CATALOG}s)")
-        
+        logger.info(
+            "Recommendations served from cache with SWR (key=%s, items=%s)",
+            cache_key,
+            len(ranked) if ranked else 0,
+        )
+        return ranked or []
+
+    async def _build_recommendations(
+        self,
+        media_type: Optional[str],
+        auth_key: str,
+    ) -> List[Dict[str, Any]]:
+        """Compute recommendations without handling cache lifecycle."""
+        self.config.stremio_auth_key = auth_key
+
+        # Get seed items and watched list in parallel
+        logger.debug("Fetching seed items and watched list...")
+        seeds_task = self.get_seed_items()
+        watched_task = self.get_watched_items()
+
+        seeds, watched = await asyncio.gather(seeds_task, watched_task)
+        logger.debug(f"  Seeds: {len(seeds)} items, Watched: {len(watched)} items")
+        if seeds:
+            seed_preview = seeds[:10]
+            logger.info(f"Seed IMDB IDs (up to 10): {seed_preview}")
+
+        if not seeds:
+            logger.warning("No seed items found for recommendations")
+            return []
+
+        # Fetch recommendations
+        logger.debug(f"Fetching recommendations for {len(seeds)} seed items...")
+        recommendations, seed_genres = await self.fetch_recommendations_for_seeds(seeds)
+        logger.debug(f"  Found {len(recommendations)} candidate recommendations")
+
+        if not recommendations:
+            logger.info("No recommendations or similars found for seeds; returning empty list")
+            return []
+
+        # Ensure external_ids/imdb_id present for poster conversion and scoring
+        logger.debug("Attaching external IDs...")
+        recommendations = await self._attach_external_ids(recommendations)
+
+        # Enrich with ratings
+        logger.debug("Enriching with ratings...")
+        enriched = await self.enrich_with_ratings(recommendations)
+
+        # Score and rank
+        logger.debug("Scoring and ranking recommendations...")
+        ranked = await self.score_and_rank(enriched, watched, seed_genres)
+        logger.debug(f"  Ranked to {len(ranked)} items")
+
+        # Filter by media type
+        if media_type:
+            type_map = {"movie": "movie", "series": "tv"}
+            tmdb_type = type_map.get(media_type)
+
+            if tmdb_type:
+                ranked = [
+                    item for item in ranked
+                    if item.get("media_type") == tmdb_type
+                ]
+            logger.debug(f"  Filtered to {len(ranked)} {media_type}s")
+
         return ranked

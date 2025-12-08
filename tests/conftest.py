@@ -12,7 +12,7 @@ async def fake_redis():
     redis_client = await fakeredis.FakeRedis(decode_responses=True)
     yield redis_client
     await redis_client.flushall()
-    await redis_client.close()
+    await redis_client.aclose()
 
 
 @pytest.fixture
@@ -21,6 +21,8 @@ def sample_user_config():
     from app.models.config import UserConfig
     
     return UserConfig(
+        stremio_username_enc="dXNlcm5hbWU=",  # Fake Base64-encoded username
+        stremio_password_enc="cGFzc3dvcmQ=",  # Fake Base64-encoded password
         stremio_auth_key="SXFxRURKV2lNVXVjemtuaU1RYlZFaENXREhUTUVKeGY=",  # Base64-like (44 chars)
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",  # Fake 32-char hex

@@ -40,48 +40,11 @@ class BackgroundTaskManager:
         auth_key_short = (config.stremio_auth_key or config.stremio_username_enc or "unknown")[:10]
         logger.info(f"[Background] Starting cache warming for {auth_key_short}...")
         try:
-            # Refresh library history
-            stremio = StremioClient()
-            auth_key = await stremio.resolve_auth_key(config)
-            if not auth_key:
-                logger.warning(f"[Background] No Stremio auth key for {auth_key_short}; skipping warming")
-                await stremio.close()
-                return
-            library = None
-            try:
-                logger.debug(f"[Background] Refreshing library history for {auth_key_short}...")
-                library = await stremio.fetch_library(auth_key)  # Forces fresh fetch
-                all_watched = stremio.extract_recently_watched(library, limit=100)
-                logger.info(f"[Background] Library refreshed: {len(all_watched)} recently watched items")
-            except Exception as e:
-                logger.warning(f"[Background] Error refreshing library: {e}")
-            
-            # Refresh loved items if enabled
-            if config.use_loved_items:
-                try:
-                    logger.debug(f"[Background] Refreshing loved catalogs for {auth_key_short}...")
-                    loved_movies = await stremio.fetch_loved_catalog("movie", token=config.stremio_loved_token)
-                    loved_series = await stremio.fetch_loved_catalog("series", token=config.stremio_loved_token)
-                    logger.info(f"[Background] Loved items: {len(loved_movies or [])} movies, {len(loved_series or [])} series")
-                except Exception as e:
-                    logger.warning(f"[Background] Error refreshing loved catalogs: {e}")
-            
-            # Filter watched items by 50% progress
-            try:
-                logger.debug(f"[Background] Filtering watched items by 50% progress for {auth_key_short}...")
-                if library:
-                    all_watched = stremio.extract_recently_watched(library, limit=100)
-                    # Filter to items watched 50%+ (in parallel for efficiency)
-                    filtered_watched = await stremio.filter_by_progress(
-                        auth_key, all_watched, min_progress=0.5
-                    )
-                    logger.info(f"[Background] Progress filtered: {len(all_watched)} -> {len(filtered_watched)} items (50%+ progress)")
-            except Exception as e:
-                logger.warning(f"[Background] Error filtering by progress: {e}")
-            
-            await stremio.close()
-            
             engine = RecommendationEngine(config)
+
+            # Prime SWR caches for seeds and watched to avoid re-pulling libraries during warm cycles
+            await engine.get_seed_items()
+            await engine.get_watched_items()
             
             # Warm cache for movies if enabled
             if config.include_movies:

@@ -63,6 +63,8 @@ def main():
         config = UserConfig(
             stremio_auth_key=stremio_auth,
             stremio_loved_token=loved_token or None,
+            stremio_username_enc=None,
+            stremio_password_enc=None,
             tmdb_api_key=tmdb_key,
             mdblist_api_key=mdblist_key,
             num_rows=num_rows,

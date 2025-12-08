@@ -12,6 +12,8 @@ def sample_config():
     """Sample user configuration for testing"""
     return UserConfig(
         stremio_auth_key="SXFxRURKV2lNVXVjemtuaU1RYlZFaENXREhUTUVKeGY=",
+        stremio_username_enc="dXNlcm5hbWVfZmFrZQ==",
+        stremio_password_enc="cGFzc3dvcmRfZmFrZQ==",
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",
         mdblist_api_key="fake1234567890abcdefghijklmnop",
@@ -60,6 +62,8 @@ def test_register_multiple_configs():
     
     config1 = UserConfig(
         stremio_auth_key="QXV0aEtleTFGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=",
+        stremio_username_enc="dXNlcm5hbWUxX2Zha2U=",
+        stremio_password_enc="cGFzc3dvcmQxX2Zha2U=",
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",
         mdblist_api_key="fake1234567890abcdefgh1",
@@ -69,9 +73,11 @@ def test_register_multiple_configs():
         include_movies=True,
         include_series=True,
     )
-    
+
     config2 = UserConfig(
         stremio_auth_key="QXV0aEtleTJGYWtlU3RyZW1pb0F1dGhLZXlCYXNlNjQ=",
+        stremio_username_enc="dXNlcm5hbWUyX2Zha2U=",
+        stremio_password_enc="cGFzc3dvcmQyX2Zha2U=",
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="8b2c5de6a8174d0c227b7da3a1860254",
         mdblist_api_key="fake1234567890abcdefgh2",
