@@ -4,11 +4,14 @@ Returns the Stremio addon manifest with dynamic catalogs
 """
 import json
 import logging
+import asyncio
 from fastapi import APIRouter, HTTPException, Path, Response
 from app.models.stremio import Manifest, ManifestCatalog
 from app.utils.token import decode_config
 from app.services.stremio import StremioClient
 from app.services.tmdb import TMDBClient
+from app.services.cache import CacheManager
+from app.services.recommendations import RecommendationEngine
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -160,4 +163,64 @@ async def get_manifest(
     
     logger.info(f"Manifest generated with {len(catalogs)} catalogs")
     
+    # Trigger background catalog warming when manifest is requested
+    asyncio.create_task(_warm_and_cache_catalogs(token, config, catalogs))
+    
     return manifest.model_dump()
+
+
+async def _warm_and_cache_catalogs(token: str, config, catalogs: list):
+    """
+    Pull catalog items from cache or regenerate if stale.
+    Runs in background when manifest.json is requested.
+    
+    Args:
+        token: User configuration token
+        config: User configuration
+        catalogs: List of ManifestCatalog objects
+    """
+    from app.api.endpoints.catalog import convert_to_meta_poster
+    
+    cache = CacheManager()
+    try:
+        for catalog in catalogs:
+            catalog_id = catalog.id
+            media_type = catalog.type
+            cache_key = f"catalog:{token}:{media_type}:{catalog_id}"
+            
+            # Check if catalog is cached and fresh
+            cached_value, is_stale = await cache.get_with_freshness(cache_key)
+            
+            if cached_value and not is_stale:
+                logger.debug(f"[Manifest Warm] Catalog {catalog_id} is fresh in cache")
+                continue
+            
+            # Cache miss or stale - regenerate in background
+            logger.info(f"[Manifest Warm] Regenerating {'stale ' if is_stale else ''}catalog {catalog_id}")
+            try:
+                engine = RecommendationEngine(config)
+                recommendations = await engine.generate_recommendations(media_type=media_type)
+                await engine.close()
+                
+                if recommendations:
+                    # Convert to MetaPoster format before caching
+                    metas = [convert_to_meta_poster(item, media_type) for item in recommendations[:100]]
+                    
+                    if metas:
+                        # Cache MetaPoster objects as dicts
+                        await cache.set(
+                            cache_key,
+                            [m.model_dump() for m in metas],
+                            ttl=3600  # 1 hour TTL
+                        )
+                        logger.info(f"[Manifest Warm] Cached {len(metas)} items for {catalog_id}")
+                    else:
+                        logger.warning(f"[Manifest Warm] No valid items for {catalog_id}")
+                else:
+                    logger.warning(f"[Manifest Warm] No recommendations for {catalog_id}")
+            except Exception as e:
+                logger.error(f"[Manifest Warm] Failed to warm {catalog_id}: {e}")
+    except Exception as e:
+        logger.error(f"[Manifest Warm] Cache warming failed: {e}")
+    finally:
+        await cache.close()

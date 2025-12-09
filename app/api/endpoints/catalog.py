@@ -7,7 +7,6 @@ from app.models.stremio import CatalogResponse, MetaPoster
 from app.services.recommendations import RecommendationEngine
 from app.services.background import get_task_manager
 from app.utils.token import decode_config
-from app.services.cinemeta import CinemetaClient
 import asyncio
 import logging
 
@@ -93,7 +92,6 @@ async def get_catalog(
     if not id.startswith("dynamic_"):
         raise HTTPException(status_code=404, detail="Catalog not found")
     
-    cinemeta = CinemetaClient()
     engine: RecommendationEngine = None  # type: ignore
 
     try:
@@ -136,22 +134,6 @@ async def get_catalog(
                 )
                 continue
 
-            # Cinemeta fallback for missing visuals/overview
-            needs_fallback = not (item.get("poster_path") and item.get("backdrop_path") and item.get("overview"))
-            if needs_fallback:
-                meta_fallback = await cinemeta.fetch_meta(type, imdb_id)
-                if meta_fallback:
-                    item.setdefault("overview", meta_fallback.get("description"))
-                    item.setdefault("poster_path", meta_fallback.get("poster"))
-                    item.setdefault("backdrop_path", meta_fallback.get("background"))
-                    item.setdefault("release_date", meta_fallback.get("releaseInfo"))
-                    rating = meta_fallback.get("imdbRating")
-                    if rating and not item.get("merged_rating"):
-                        try:
-                            item["merged_rating"] = float(rating)
-                        except Exception:
-                            pass
-
             try:
                 meta = convert_to_meta_poster(item, type)
                 metas.append(meta)
@@ -172,6 +154,5 @@ async def get_catalog(
         logger.error(f"Error generating catalog: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate recommendations")
     finally:
-        await cinemeta.close()
         if engine:
             await engine.close()
