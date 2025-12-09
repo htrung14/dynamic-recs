@@ -18,7 +18,8 @@ async def health_check(include_swr: bool = Query(False, description="Include SWR
     }
 
     if include_swr:
+        import json
         cache = CacheManager()
-        payload["swr_metrics"] = cache.get_metrics_snapshot()
+        payload["swr_metrics"] = json.dumps(cache.get_metrics_snapshot())
 
     return payload
