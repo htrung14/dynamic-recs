@@ -105,33 +105,101 @@ class TMDBClient:
                 logger.error(f"TMDB request error: {e}")
                 return None
     
-    async def get_recommendations(
+    async def get_keywords(
+        self,
+        tmdb_id: int,
+        media_type: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get keywords for a movie or series
+        
+        Args:
+            tmdb_id: TMDB ID
+            media_type: "movie" or "tv"
+            
+        Returns:
+            List of keyword objects with 'id' and 'name'
+        """
+        cache_key = f"keywords:{media_type}:{tmdb_id}:tmdb"
+
+        async def build() -> List[Dict[str, Any]]:
+            endpoint = f"/{media_type}/{tmdb_id}/keywords"
+            response = await self._request(endpoint)
+
+            if response:
+                # Movies return {"keywords": [...]}, TV shows return {"results": [...]}
+                keywords = response.get("keywords") or response.get("results") or []
+                return keywords
+            return []
+
+        return await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_RECOMMENDATIONS,
+            stale_ttl=settings.CACHE_TTL_RECOMMENDATIONS * 3,
+        )
+
+    async def get_niche_recommendations(
         self,
         tmdb_id: int,
         media_type: str,
         page: int = 1
     ) -> List[Dict[str, Any]]:
         """
-        Get recommendations for a movie or series
+        Get niche, highly relevant recommendations using the Discover API
+        with strict filtering to avoid mainstream blockbusters.
         
         Args:
-            tmdb_id: TMDB ID
+            tmdb_id: TMDB ID of the source movie/series
             media_type: "movie" or "tv"
             page: Page number
             
         Returns:
-            List of recommendation items
+            List of niche recommendation items
         """
-        cache_key = f"rec:{media_type}:{tmdb_id}:tmdb:page{page}"
+        cache_key = f"niche_rec:{media_type}:{tmdb_id}:tmdb:page{page}"
 
         async def build() -> List[Dict[str, Any]]:
-            endpoint = f"/{media_type}/{tmdb_id}/recommendations"
-            response = await self._request(endpoint, {"page": page})
-
+            # Step 1: Fetch keywords for the source movie/series
+            keywords = await self.get_keywords(tmdb_id, media_type)
+            
+            if not keywords:
+                # Fallback to similar if no keywords available
+                logger.debug(f"No keywords found for {media_type} {tmdb_id}, using similar endpoint")
+                endpoint = f"/{media_type}/{tmdb_id}/similar"
+                response = await self._request(endpoint, {"page": page})
+                if response and "results" in response:
+                    results = response["results"]
+                    for item in results:
+                        item.setdefault("media_type", media_type)
+                    return results
+                return []
+            
+            # Step 2: Extract top 3-5 keyword IDs
+            keyword_ids = [str(kw["id"]) for kw in keywords[:5]]
+            keyword_filter = "|".join(keyword_ids)  # OR logic
+            
+            # Step 3: Use Discover API with niche filters
+            endpoint = "/discover/movie" if media_type == "movie" else "/discover/tv"
+            params = {
+                "page": page,
+                "with_keywords": keyword_filter,
+                "vote_count.gte": 50,          # Avoid garbage data
+                "vote_count.lte": 5000,        # Filter out blockbusters
+                "vote_average.gte": 7.0,       # Ensure quality
+                "sort_by": "vote_average.desc"  # Best-rated first
+            }
+            
+            response = await self._request(endpoint, params)
+            
             if response and "results" in response:
                 results = response["results"]
                 for item in results:
                     item.setdefault("media_type", media_type)
+                logger.debug(
+                    f"Niche discovery for {media_type} {tmdb_id}: found {len(results)} items "
+                    f"using keywords {keyword_filter}"
+                )
                 return results
             return []
 
@@ -141,6 +209,26 @@ class TMDBClient:
             ttl=settings.CACHE_TTL_RECOMMENDATIONS,
             stale_ttl=settings.CACHE_TTL_RECOMMENDATIONS * 3,
         )
+
+    async def get_recommendations(
+        self,
+        tmdb_id: int,
+        media_type: str,
+        page: int = 1
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recommendations for a movie or series (now using niche discovery)
+        
+        Args:
+            tmdb_id: TMDB ID
+            media_type: "movie" or "tv"
+            page: Page number
+            
+        Returns:
+            List of recommendation items
+        """
+        # Redirect to niche recommendations for better quality
+        return await self.get_niche_recommendations(tmdb_id, media_type, page)
 
     async def get_similar(
         self,
