@@ -126,7 +126,7 @@ async def configure_page(token: str = None):
         use_loved_default = True
         include_movies_default = True
         include_series_default = True
-        exclude_anime_default = False
+        exclude_anime_default = True
     
     html_content = """
 <!DOCTYPE html>
