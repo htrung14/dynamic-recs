@@ -119,12 +119,14 @@ async def configure_page(token: str = None):
         use_loved_default = existing_config.use_loved_items
         include_movies_default = existing_config.include_movies
         include_series_default = existing_config.include_series
+        exclude_anime_default = existing_config.exclude_anime
     else:
         num_rows_default = 5
         min_rating_default = 6.0
         use_loved_default = True
         include_movies_default = True
         include_series_default = True
+        exclude_anime_default = False
     
     html_content = """
 <!DOCTYPE html>
@@ -363,6 +365,13 @@ async def configure_page(token: str = None):
                 </div>
             </div>
             
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="exclude_anime" __EXCLUDE_ANIME_CHECKED__>
+                    <label for="exclude_anime">Exclude anime</label>
+                </div>
+            </div>
+            
             <button type="submit">Generate Install URL</button>
             
             <div class="error" id="error"></div>
@@ -439,7 +448,8 @@ async def configure_page(token: str = None):
                 min_rating: parseFloat(document.getElementById('min_rating').value),
                 use_loved_items: document.getElementById('use_loved').checked,
                 include_movies: document.getElementById('include_movies').checked,
-                include_series: document.getElementById('include_series').checked
+                include_series: document.getElementById('include_series').checked,
+                exclude_anime: document.getElementById('exclude_anime').checked
             };
             
             const hasAuth = !!config.stremio_auth_key;
@@ -565,5 +575,6 @@ async def configure_page(token: str = None):
     html_content = html_content.replace("__USE_LOVED_CHECKED__", "checked" if use_loved_default else "")
     html_content = html_content.replace("__INCLUDE_MOVIES_CHECKED__", "checked" if include_movies_default else "")
     html_content = html_content.replace("__INCLUDE_SERIES_CHECKED__", "checked" if include_series_default else "")
+    html_content = html_content.replace("__EXCLUDE_ANIME_CHECKED__", "checked" if exclude_anime_default else "")
     
     return html_content

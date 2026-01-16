@@ -33,6 +33,32 @@ class RecommendationEngine:
         await self.mdblist.close()
         await self.stremio.close()
     
+    def _is_anime(self, item: Dict[str, Any]) -> bool:
+        """
+        Detect if an item is anime based on origin country and genres
+        
+        Args:
+            item: TMDB item data
+            
+        Returns:
+            True if item appears to be anime, False otherwise
+        """
+        # Check origin country (JP = Japan, often anime)
+        origin_country = item.get("origin_country", [])
+        if "JP" in origin_country:
+            return True
+        
+        # Check for animation genre (genre ID 16 in TMDB)
+        genre_ids = item.get("genre_ids", [])
+        if not genre_ids and item.get("genres"):
+            genre_ids = [g.get("id") for g in item.get("genres", []) if g.get("id")]
+        
+        # TMDB Animation genre ID is 16
+        if 16 in genre_ids:
+            return True
+        
+        return False
+    
     async def _filter_imdb_ids_by_media_type(
         self,
         imdb_ids: List[str],
@@ -335,7 +361,7 @@ class RecommendationEngine:
         # Deduplicate by TMDB ID
         items = deduplicate_recommendations(items, key="id")
         
-        # Filter out watched items
+        # Filter out watched items and anime (if configured)
         watched_set = set(watched)
         filtered = []
         
@@ -344,6 +370,10 @@ class RecommendationEngine:
             imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
             
             if imdb_id not in watched_set:
+                # Filter anime if enabled
+                if self.config.exclude_anime and self._is_anime(item):
+                    logger.debug(f"Filtering anime: {item.get('name') or item.get('title')}")
+                    continue
                 filtered.append(item)
         
         # Calculate frequency scores

@@ -18,6 +18,7 @@ class UserConfig(BaseModel):
     use_loved_items: bool = Field(True, description="Prioritize loved items over watch history")
     include_movies: bool = Field(True, description="Include movie recommendations")
     include_series: bool = Field(True, description="Include series recommendations")
+    exclude_anime: bool = Field(False, description="Exclude anime content from recommendations")
     stremio_loved_token: Optional[str] = Field(
         None,
         description="Token for official Stremio loved addon; falls back to server default if unset",
