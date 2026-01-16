@@ -46,6 +46,7 @@ def encode_config(config: UserConfig) -> str:
 def decode_config(token: str) -> Optional[UserConfig]:
     """
     Decode and validate user configuration from token
+    Automatically migrates old configs to include new fields with defaults
     
     Args:
         token: Base64-encoded token string
@@ -74,8 +75,14 @@ def decode_config(token: str) -> Optional[UserConfig]:
         if not hmac.compare_digest(signature, expected_signature):
             return None
         
-        # Parse and validate config
+        # Parse config with automatic migration of old tokens
         config_dict = json.loads(config_json)
+        
+        # Auto-migrate old tokens by adding new fields with defaults if missing
+        # This allows old tokens to work seamlessly with new code
+        if 'exclude_anime' not in config_dict:
+            config_dict['exclude_anime'] = True  # New default
+        
         return UserConfig(**config_dict)
         
     except Exception:
