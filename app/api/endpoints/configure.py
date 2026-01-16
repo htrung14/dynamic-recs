@@ -95,13 +95,36 @@ async def generate_token(request: ConfigRequest):
 
 @router.get("/", response_class=HTMLResponse)
 @router.get("/configure", response_class=HTMLResponse)
-async def configure_page():
-    """Serve configuration page"""
+@router.get("/{token}/configure", response_class=HTMLResponse)
+async def configure_page(token: str = None):
+    """Serve configuration page - can pre-fill with existing config if token provided"""
+    
+    # Try to load existing config from token if provided
+    existing_config = None
+    if token:
+        existing_config = decode_config(token)
     
     # Get server defaults for API keys
     tmdb_default = settings.TMDB_API_KEY or ""
     mdblist_default = settings.MDBLIST_API_KEY or ""
     stremio_loved_default = settings.STREMIO_LOVED_TOKEN or ""
+    
+    # Use existing config values if available, otherwise use defaults
+    if existing_config:
+        tmdb_default = existing_config.tmdb_api_key
+        mdblist_default = existing_config.mdblist_api_key
+        stremio_loved_default = existing_config.stremio_loved_token or ""
+        num_rows_default = existing_config.num_rows
+        min_rating_default = existing_config.min_rating
+        use_loved_default = existing_config.use_loved_items
+        include_movies_default = existing_config.include_movies
+        include_series_default = existing_config.include_series
+    else:
+        num_rows_default = 5
+        min_rating_default = 6.0
+        use_loved_default = True
+        include_movies_default = True
+        include_series_default = True
     
     html_content = """
 <!DOCTYPE html>
@@ -309,33 +332,33 @@ async def configure_page():
             
             <div class="form-group">
                 <label for="num_rows">Number of Recommendation Rows</label>
-                <input type="number" id="num_rows" min="1" max="20" value="5">
+                <input type="number" id="num_rows" min="1" max="20" value="__NUM_ROWS_DEFAULT__">
                 <div class="helper-text">How many "Because you watched X" rows to show</div>
             </div>
             
             <div class="form-group">
                 <label for="min_rating">Minimum Rating Filter</label>
-                <input type="number" id="min_rating" min="0" max="10" step="0.1" value="6.0">
+                <input type="number" id="min_rating" min="0" max="10" step="0.1" value="__MIN_RATING_DEFAULT__">
                 <div class="helper-text">Only show content with this rating or higher</div>
             </div>
             
             <div class="form-group">
                 <div class="checkbox-group">
-                    <input type="checkbox" id="use_loved" checked>
+                    <input type="checkbox" id="use_loved" __USE_LOVED_CHECKED__>
                     <label for="use_loved">Prioritize loved items over watch history</label>
                 </div>
             </div>
             
             <div class="form-group">
                 <div class="checkbox-group">
-                    <input type="checkbox" id="include_movies" checked>
+                    <input type="checkbox" id="include_movies" __INCLUDE_MOVIES_CHECKED__>
                     <label for="include_movies">Include movies</label>
                 </div>
             </div>
             
             <div class="form-group">
                 <div class="checkbox-group">
-                    <input type="checkbox" id="include_series" checked>
+                    <input type="checkbox" id="include_series" __INCLUDE_SERIES_CHECKED__>
                     <label for="include_series">Include series</label>
                 </div>
             </div>
@@ -537,5 +560,10 @@ async def configure_page():
     html_content = html_content.replace("__TMDB_DEFAULT__", tmdb_default)
     html_content = html_content.replace("__MDBLIST_DEFAULT__", mdblist_default)
     html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", stremio_loved_default)
+    html_content = html_content.replace("__NUM_ROWS_DEFAULT__", str(num_rows_default))
+    html_content = html_content.replace("__MIN_RATING_DEFAULT__", str(min_rating_default))
+    html_content = html_content.replace("__USE_LOVED_CHECKED__", "checked" if use_loved_default else "")
+    html_content = html_content.replace("__INCLUDE_MOVIES_CHECKED__", "checked" if include_movies_default else "")
+    html_content = html_content.replace("__INCLUDE_SERIES_CHECKED__", "checked" if include_series_default else "")
     
     return html_content

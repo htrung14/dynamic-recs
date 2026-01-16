@@ -44,10 +44,11 @@ async def get_manifest(
     try:
         auth_key = await stremio.resolve_auth_key(config)
         if not auth_key:
-            raise HTTPException(status_code=401, detail="Stremio authentication failed")
-
-        library = await stremio.fetch_library(auth_key)
-        recent_watches = stremio.extract_recently_watched(library, limit=max(config.num_rows, 10))
+            logger.warning("Stremio authentication failed - using generic catalog names")
+            recent_watches = []
+        else:
+            library = await stremio.fetch_library(auth_key)
+            recent_watches = stremio.extract_recently_watched(library, limit=max(config.num_rows, 10))
     except Exception as e:
         logger.warning(f"Failed to fetch library for manifest: {e}")
         recent_watches = []
@@ -159,14 +160,28 @@ async def get_manifest(
     await stremio.close()
     await tmdb.close()
     
-    manifest = Manifest(catalogs=catalogs)
+    # Build manifest with behavior hints including configure URL
+    from app.core.config import settings
+    manifest = Manifest(
+        catalogs=catalogs,
+        behaviorHints={
+            "configurable": True,
+            "configurationRequired": False,
+            "adult": False,
+            "p2p": False
+        }
+    )
+    
+    # Add the configuration URL to the manifest dict
+    manifest_dict = manifest.model_dump()
+    manifest_dict["behaviorHints"]["configurationUrl"] = f"{settings.BASE_URL}/{token}/configure"
     
     logger.info(f"Manifest generated with {len(catalogs)} catalogs")
     
     # Trigger background catalog warming when manifest is requested
     asyncio.create_task(_warm_and_cache_catalogs(token, config, catalogs))
     
-    return manifest.model_dump()
+    return manifest_dict
 
 
 async def _warm_and_cache_catalogs(token: str, config, catalogs: list):
