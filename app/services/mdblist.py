@@ -30,7 +30,7 @@ class MDBListClient:
         """Get or create aiohttp session"""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=30)  # Increased from 10s to 30s
             )
         return self.session
     
@@ -39,12 +39,13 @@ class MDBListClient:
         if self.session and not self.session.closed:
             await self.session.close()
     
-    async def get_rating(self, imdb_id: str) -> Optional[Dict[str, Any]]:
+    async def get_rating(self, imdb_id: str, retry_count: int = 0) -> Optional[Dict[str, Any]]:
         """
-        Get ratings for an IMDB ID
+        Get ratings for an IMDB ID with retry logic (max 2 retries)
         
         Args:
             imdb_id: IMDB ID (e.g., "tt1234567")
+            retry_count: Current retry attempt (internal use)
             
         Returns:
             Rating data or None
@@ -66,6 +67,9 @@ class MDBListClient:
                 "mdblist", settings.MDBLIST_RATE_LIMIT
             )
         await MDBListClient._rate_limiter.acquire()
+        
+        max_retries = 2
+        backoff = 1.0
         
         try:
             session = await self.get_session()
@@ -92,18 +96,30 @@ class MDBListClient:
                     await asyncio.sleep(2)
                     return None
                 elif response.status == 503:
-                    now = time.monotonic()
-                    if now - MDBListClient._last_503_log > MDBListClient.UNAVAILABLE_LOG_COOLDOWN:
-                        MDBListClient._last_503_log = now
-                        logger.debug("MDBList temporarily unavailable (503)")
-                    return None
+                    # Retry on 503 (service unavailable)
+                    if retry_count < max_retries:
+                        logger.debug(f"MDBList 503, retrying... ({retry_count + 1}/{max_retries})")
+                        await asyncio.sleep(backoff * (retry_count + 1))
+                        return await self.get_rating(imdb_id, retry_count + 1)
+                    else:
+                        now = time.monotonic()
+                        if now - MDBListClient._last_503_log > MDBListClient.UNAVAILABLE_LOG_COOLDOWN:
+                            MDBListClient._last_503_log = now
+                            logger.debug(f"MDBList unavailable after {max_retries} retries, skipping enrichment")
+                        return None
                 else:
                     logger.error(f"MDBList API error: {response.status}")
                     return None
                     
         except asyncio.TimeoutError:
-            logger.error(f"MDBList request timeout for {imdb_id}")
-            return None
+            # Retry on timeout
+            if retry_count < max_retries:
+                logger.debug(f"MDBList timeout, retrying... ({retry_count + 1}/{max_retries})")
+                await asyncio.sleep(backoff * (retry_count + 1))
+                return await self.get_rating(imdb_id, retry_count + 1)
+            else:
+                logger.error(f"MDBList request timeout for {imdb_id} after {max_retries} retries, skipping")
+                return None
         except Exception as e:
             logger.error(f"MDBList request error: {e}")
             return None

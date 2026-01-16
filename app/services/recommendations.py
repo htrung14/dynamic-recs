@@ -269,7 +269,7 @@ class RecommendationEngine:
     async def enrich_with_ratings(
         self,
         items: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], bool]:
         """
         Enrich items with ratings from MDBList
         
@@ -277,7 +277,7 @@ class RecommendationEngine:
             items: List of TMDB recommendation items
             
         Returns:
-            Items with added rating information
+            Tuple of (items with ratings, mdblist_available flag)
         """
         # Extract IMDB IDs
         imdb_ids = []
@@ -289,6 +289,9 @@ class RecommendationEngine:
         
         # Fetch ratings in batch
         ratings = await self.mdblist.batch_ratings(imdb_ids)
+        
+        # Check if MDBList is available (not all None)
+        mdblist_available = any(rating is not None for rating in ratings.values())
         
         # Merge ratings into items
         enriched = []
@@ -311,7 +314,7 @@ class RecommendationEngine:
             
             enriched.append(item)
         
-        return enriched
+        return enriched, mdblist_available
     
     async def score_and_rank(
         self,
@@ -489,7 +492,10 @@ class RecommendationEngine:
 
         # Enrich with ratings
         logger.debug("Enriching with ratings...")
-        enriched = await self.enrich_with_ratings(recommendations)
+        enriched, mdblist_available = await self.enrich_with_ratings(recommendations)
+        
+        if not mdblist_available:
+            logger.warning("MDBList unavailable after retries, continuing without ratings")
 
         # Score and rank
         logger.debug("Scoring and ranking recommendations...")

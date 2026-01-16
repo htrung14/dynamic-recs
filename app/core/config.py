@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Cache TTLs (seconds)
     CACHE_TTL_LIBRARY: int = 21600  # 6 hours
     CACHE_TTL_RECOMMENDATIONS: int = 86400  # 24 hours
+    CACHE_TTL_RECOMMENDATIONS_SHORT: int = 3600  # 1 hour (used when MDBList fails)
     CACHE_TTL_RATINGS: int = 604800  # 7 days
     CACHE_TTL_CATALOG: int = 3600  # 1 hour
     
