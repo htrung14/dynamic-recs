@@ -174,7 +174,8 @@ async def get_manifest(
     
     # Add the configuration URL to the manifest dict
     manifest_dict = manifest.model_dump()
-    manifest_dict["behaviorHints"]["configurationUrl"] = f"{settings.BASE_URL}/{token}/configure"
+    base_url = settings.BASE_URL.rstrip("/")
+    manifest_dict["behaviorHints"]["configurationUrl"] = f"{base_url}/{token}/configure"
     
     logger.info(f"Manifest generated with {len(catalogs)} catalogs")
     
