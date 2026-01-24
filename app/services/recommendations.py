@@ -122,6 +122,11 @@ class RecommendationEngine:
             library = await self.stremio.fetch_library(auth_key)
             logger.debug("  Library fetched")
             recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS * 2)
+
+            # Fallback: some libraries omit timestamps, so fall back to raw watched list
+            if not recent:
+                recent = self.stremio.extract_watched_items(library)
+
             if media_type:
                 recent = await self._filter_imdb_ids_by_media_type(recent, media_type)
             # Always append watched items to diversify seeds (even when loved exist)
