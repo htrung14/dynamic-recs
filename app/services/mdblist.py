@@ -20,6 +20,10 @@ class MDBListClient:
     _rate_limiter: Optional[RateLimiter] = None
     _last_503_log: float = 0.0
     UNAVAILABLE_LOG_COOLDOWN = 10  # seconds
+    _consecutive_503: int = 0
+    UNAVAILABLE_KEY = "mdblist:unavailable"
+    UNAVAILABLE_TTL = 600  # seconds to skip MDBList after repeated 503s
+    UNAVAILABLE_TRIGGER = 3  # consecutive 503s before tripping circuit
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.MDBLIST_API_KEY
@@ -60,6 +64,14 @@ class MDBListClient:
         cached = await self.cache.get(cache_key)
         if cached:
             return cached
+
+        # Circuit breaker: skip if recent 503 storms
+        if await self.cache.get(self.UNAVAILABLE_KEY):
+            now = time.monotonic()
+            if now - MDBListClient._last_503_log > self.UNAVAILABLE_LOG_COOLDOWN:
+                MDBListClient._last_503_log = now
+                logger.info("MDBList marked unavailable; skipping enrichment (circuit open)")
+            return None
         
         # Get or create shared rate limiter for this service
         if MDBListClient._rate_limiter is None:
@@ -69,7 +81,7 @@ class MDBListClient:
         await MDBListClient._rate_limiter.acquire()
         
         max_retries = 2
-        backoff = 1.0
+        backoff = 0.5  # base backoff (seconds)
         
         try:
             session = await self.get_session()
@@ -81,6 +93,7 @@ class MDBListClient:
             
             async with session.get(self.BASE_URL, params=params) as response:
                 if response.status == 200:
+                    MDBListClient._consecutive_503 = 0
                     data = await response.json()
                     
                     # Cache the result
@@ -98,10 +111,16 @@ class MDBListClient:
                 elif response.status == 503:
                     # Retry on 503 (service unavailable)
                     if retry_count < max_retries:
+                        # Add jitter to reduce thundering herd
+                        delay = backoff * (retry_count + 1)
+                        delay += 0.1 * asyncio.get_event_loop().time() % 0.1
                         logger.debug(f"MDBList 503, retrying... ({retry_count + 1}/{max_retries})")
-                        await asyncio.sleep(backoff * (retry_count + 1))
+                        await asyncio.sleep(delay)
                         return await self.get_rating(imdb_id, retry_count + 1)
                     else:
+                        MDBListClient._consecutive_503 += 1
+                        if MDBListClient._consecutive_503 >= self.UNAVAILABLE_TRIGGER:
+                            await self.cache.set(self.UNAVAILABLE_KEY, True, ttl=self.UNAVAILABLE_TTL)
                         now = time.monotonic()
                         if now - MDBListClient._last_503_log > MDBListClient.UNAVAILABLE_LOG_COOLDOWN:
                             MDBListClient._last_503_log = now
@@ -114,8 +133,10 @@ class MDBListClient:
         except asyncio.TimeoutError:
             # Retry on timeout
             if retry_count < max_retries:
+                delay = backoff * (retry_count + 1)
+                delay += 0.1 * asyncio.get_event_loop().time() % 0.1
                 logger.debug(f"MDBList timeout, retrying... ({retry_count + 1}/{max_retries})")
-                await asyncio.sleep(backoff * (retry_count + 1))
+                await asyncio.sleep(delay)
                 return await self.get_rating(imdb_id, retry_count + 1)
             else:
                 logger.error(f"MDBList request timeout for {imdb_id} after {max_retries} retries, skipping")
