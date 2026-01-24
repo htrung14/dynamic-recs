@@ -220,7 +220,29 @@ async def _warm_and_cache_catalogs(token: str, config, catalogs: list):
                 
                 if recommendations:
                     # Convert to MetaPoster format before caching
-                    metas = [convert_to_meta_poster(item, media_type) for item in recommendations[:100]]
+                    # Skip items without valid IMDB ID (same logic as catalog.py)
+                    metas = []
+                    for item in recommendations[:100]:
+                        external_ids = item.get("external_ids", {})
+                        imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
+                        if not imdb_id:
+                            logger.debug(
+                                "[Manifest Warm] Skipping item without IMDB ID: %s (tmdb_id=%s)",
+                                item.get("title") or item.get("name"),
+                                item.get("id")
+                            )
+                            continue
+                        
+                        try:
+                            meta = convert_to_meta_poster(item, media_type)
+                            metas.append(meta)
+                        except Exception as ex:
+                            logger.warning(
+                                "[Manifest Warm] Failed to convert item: %s (tmdb_id=%s): %s",
+                                item.get("title") or item.get("name"),
+                                item.get("id"),
+                                ex
+                            )
                     
                     if metas:
                         # Cache MetaPoster objects as dicts
