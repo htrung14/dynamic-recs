@@ -48,13 +48,8 @@ class TMDBClient:
             logger.error("TMDB API key not configured")
             return None
 
-        # Per-user rate limiting if token available, otherwise global
-        if self.token:
-            limiter = await RateLimiter.get_user_limiter(
-                "tmdb", settings.TMDB_RATE_LIMIT, self.token
-            )
-        else:
-            limiter = await RateLimiter.get_limiter("tmdb", settings.TMDB_RATE_LIMIT)
+        # Global rate limiting (per-user limiting removed for self-hosted)
+        limiter = await RateLimiter.get_limiter("tmdb", settings.TMDB_RATE_LIMIT)
         await limiter.acquire()
 
         backoff = 0.1

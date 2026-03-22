@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # Performance Limits
     MAX_SEEDS: int = 5  # Reduced from 10 to minimize API calls (5 seed items)
     MAX_RECOMMENDATIONS_PER_SEED: int = 15  # Reduced from 20 to minimize API calls (15 recs/seed)
-    MAX_CONCURRENT_API_CALLS: int = 10
+    MAX_CONCURRENT_API_CALLS: int = 35  # Increased from 10 for faster cold start
     
     # API Rate Limits (requests per second)
     # Optimized for performance while staying within API limits
