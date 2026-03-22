@@ -20,10 +20,11 @@ logger = logging.getLogger(__name__)
 class RecommendationEngine:
     """Generate personalized recommendations"""
     
-    def __init__(self, config: UserConfig):
+    def __init__(self, config: UserConfig, token: Optional[str] = None):
         self.config = config
-        self.tmdb = TMDBClient(config.tmdb_api_key)
-        self.mdblist = MDBListClient(config.mdblist_api_key)
+        self.token = token  # User token for per-user rate limiting
+        self.tmdb = TMDBClient(config.tmdb_api_key, token=token)
+        self.mdblist = MDBListClient(config.mdblist_api_key, token=token)
         self.stremio = StremioClient()
         self.cache = CacheManager()
     
@@ -310,6 +311,13 @@ class RecommendationEngine:
         Returns:
             Tuple of (items with ratings, mdblist_available flag)
         """
+        # Skip MDBList entirely if no API key configured
+        if not self.config.mdblist_api_key:
+            # Use TMDB ratings only, no MDBList enrichment
+            for item in items:
+                item["merged_rating"] = item.get("vote_average", 0.0)
+            return items, False
+        
         # Extract IMDB IDs
         imdb_ids = []
         for item in items:
@@ -522,12 +530,31 @@ class RecommendationEngine:
             return []
 
         # Ensure external_ids/imdb_id present for poster conversion and scoring
-        logger.debug("Attaching external IDs...")
-        recommendations = await self._attach_external_ids(recommendations)
-
-        # Enrich with ratings
-        logger.debug("Enriching with ratings...")
-        enriched, mdblist_available = await self.enrich_with_ratings(recommendations)
+        # Attach external IDs and fetch MDBList ratings in PARALLEL
+        # (these are independent operations once we have the seed recommendations)
+        logger.debug("Attaching external IDs and fetching ratings in parallel...")
+        
+        external_ids_task = self._attach_external_ids(recommendations)
+        ratings_task = self.enrich_with_ratings(recommendations)
+        
+        external_ids_result, ratings_result = await asyncio.gather(
+            external_ids_task, ratings_task,
+            return_exceptions=True
+        )
+        
+        # Handle any exceptions from parallel tasks
+        if isinstance(external_ids_result, Exception):
+            logger.warning(f"External ID attachment failed: {external_ids_result}, continuing with available data")
+            recommendations = recommendations  # use original
+        else:
+            recommendations = external_ids_result
+        
+        if isinstance(ratings_result, Exception):
+            logger.warning(f"Rating enrichment failed: {ratings_result}, continuing without ratings")
+            mdblist_available = False
+            enriched = recommendations
+        else:
+            enriched, mdblist_available = ratings_result
         
         if not mdblist_available:
             logger.warning("MDBList unavailable after retries, continuing without ratings")

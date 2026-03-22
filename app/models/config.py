@@ -12,7 +12,7 @@ class UserConfig(BaseModel):
     stremio_username_enc: Optional[str] = Field(None, description="Encrypted Stremio username/email")
     stremio_password_enc: Optional[str] = Field(None, description="Encrypted Stremio password")
     tmdb_api_key: str = Field(..., description="TMDB API key (required)")
-    mdblist_api_key: str = Field(..., description="MDBList API key (required)")
+    mdblist_api_key: Optional[str] = Field(None, description="MDBList API key (optional - ratings will be skipped if not provided)")
     num_rows: int = Field(5, ge=1, le=20, description="Number of recommendation rows")
     min_rating: float = Field(6.0, ge=0.0, le=10.0, description="Minimum rating filter")
     use_loved_items: bool = Field(True, description="Prioritize loved items over watch history")

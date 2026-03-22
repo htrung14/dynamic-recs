@@ -16,10 +16,10 @@ class TMDBClient:
     """Async client for TMDB API"""
     
     BASE_URL = "https://api.themoviedb.org/3"
-    _rate_limiter: Optional[RateLimiter] = None
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, token: Optional[str] = None):
         self.api_key = api_key or settings.TMDB_API_KEY
+        self.token = token  # User token for per-user rate limiting
         self.cache = CacheManager()
         self.session: Optional[aiohttp.ClientSession] = None
     
@@ -48,12 +48,14 @@ class TMDBClient:
             logger.error("TMDB API key not configured")
             return None
 
-        # Get or create shared rate limiter for this service
-        if TMDBClient._rate_limiter is None:
-            TMDBClient._rate_limiter = await RateLimiter.get_limiter(
-                "tmdb", settings.TMDB_RATE_LIMIT
+        # Per-user rate limiting if token available, otherwise global
+        if self.token:
+            limiter = await RateLimiter.get_user_limiter(
+                "tmdb", settings.TMDB_RATE_LIMIT, self.token
             )
-        await TMDBClient._rate_limiter.acquire()
+        else:
+            limiter = await RateLimiter.get_limiter("tmdb", settings.TMDB_RATE_LIMIT)
+        await limiter.acquire()
 
         backoff = 0.1
         attempts = 2

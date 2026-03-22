@@ -71,15 +71,12 @@ async def get_manifest(
         # Prefer loved seeds first, then fall back to recent watches
         seeds_for_movies = (loved_movies or []) + ([w for w in recent_watches if w not in loved_movies] if recent_watches else [])
         if loved_movies:
-            loved_preview = json.dumps(loved_movies[: config.num_rows], separators=(",", ":"))
-            logger.info(f"Because you loved (movies) seeds preview: {loved_preview}")
+            logger.debug(f"Because you loved (movies) seeds count: {len(loved_movies)}")
         watched_only = [w for w in recent_watches if w not in loved_movies] if recent_watches else []
         if watched_only:
-            watched_preview = json.dumps(watched_only[: config.num_rows], separators=(",", ":"))
-            logger.info(f"Because you watched (movies) seeds preview: {watched_preview}")
+            logger.debug(f"Because you watched (movies) seeds count: {len(watched_only)}")
         if seeds_for_movies:
-            combined_preview = json.dumps(seeds_for_movies[: config.num_rows], separators=(",", ":"))
-            logger.info(f"Movies catalog seeds (combined) preview: {combined_preview}")
+            logger.debug(f"Movies catalog seeds combined count: {len(seeds_for_movies)}")
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_movies):
@@ -116,15 +113,12 @@ async def get_manifest(
         # Prefer loved seeds first, then fall back to recent watches
         seeds_for_series = (loved_series or []) + ([w for w in recent_watches if w not in loved_series] if recent_watches else [])
         if loved_series:
-            loved_preview = json.dumps(loved_series[: config.num_rows], separators=(",", ":"))
-            logger.info(f"Because you loved (series) seeds preview: {loved_preview}")
+            logger.debug(f"Because you loved (series) seeds count: {len(loved_series)}")
         watched_only_series = [w for w in recent_watches if w not in loved_series] if recent_watches else []
         if watched_only_series:
-            watched_preview = json.dumps(watched_only_series[: config.num_rows], separators=(",", ":"))
-            logger.info(f"Because you watched (series) seeds preview: {watched_preview}")
+            logger.debug(f"Because you watched (series) seeds count: {len(watched_only_series)}")
         if seeds_for_series:
-            combined_preview = json.dumps(seeds_for_series[: config.num_rows], separators=(",", ":"))
-            logger.info(f"Series catalog seeds (combined) preview: {combined_preview}")
+            logger.debug(f"Series catalog seeds combined count: {len(seeds_for_series)}")
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_series):
@@ -214,7 +208,7 @@ async def _warm_and_cache_catalogs(token: str, config, catalogs: list):
             # Cache miss or stale - regenerate in background
             logger.info(f"[Manifest Warm] Regenerating {'stale ' if is_stale else ''}catalog {catalog_id}")
             try:
-                engine = RecommendationEngine(config)
+                engine = RecommendationEngine(config, token=token)
                 recommendations = await engine.generate_recommendations(media_type=media_type)
                 await engine.close()
                 

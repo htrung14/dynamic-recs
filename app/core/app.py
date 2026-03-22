@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from app.api.endpoints import manifest, catalog, configure, health
 from app.core.config import settings
 from app.services.background import get_task_manager
@@ -26,6 +27,14 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Dynamic Recommendations Addon")
     logger.info(f"Base URL: {settings.BASE_URL}")
+    
+    # Warn if HTTPS is not configured for production
+    base_url_lower = str(settings.BASE_URL).lower()
+    if not settings.DEBUG and base_url_lower.startswith("http://") and "localhost" not in base_url_lower and "127.0.0.1" not in base_url_lower:
+        logger.warning(
+            "BASE_URL uses HTTP (not HTTPS). Stremio requires HTTPS for production addons. "
+            "The Configure button may not work properly. Please set BASE_URL to an HTTPS endpoint."
+        )
     
     # Start background cache warming
     task_manager = get_task_manager()
@@ -62,6 +71,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    # Response compression for all responses (reduces bandwidth, faster for large payloads)
+    app.add_middleware(GZipMiddleware, minimum_size=500)
     
     # Mount static files
     try:

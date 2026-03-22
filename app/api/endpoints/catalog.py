@@ -97,10 +97,10 @@ async def get_catalog(
     try:
         # Register config for background cache warming
         task_manager = get_task_manager()
-        task_manager.register_config(config)
+        task_manager.register_config(config, token=token)
         
-        # Initialize recommendation engine
-        engine = RecommendationEngine(config)
+        # Initialize recommendation engine (pass token for per-user rate limiting)
+        engine = RecommendationEngine(config, token=token)
         
         # Generate recommendations
         recommendations = await engine.generate_recommendations(media_type=type)

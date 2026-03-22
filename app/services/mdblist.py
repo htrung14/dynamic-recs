@@ -17,7 +17,6 @@ class MDBListClient:
     """Async client for MDBList API"""
     
     BASE_URL = "https://mdblist.com/api/"
-    _rate_limiter: Optional[RateLimiter] = None
     _last_503_log: float = 0.0
     UNAVAILABLE_LOG_COOLDOWN = 10  # seconds
     _consecutive_503: int = 0
@@ -25,8 +24,9 @@ class MDBListClient:
     UNAVAILABLE_TTL = 600  # seconds to skip MDBList after repeated 503s
     UNAVAILABLE_TRIGGER = 3  # consecutive 503s before tripping circuit
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, token: Optional[str] = None):
         self.api_key = api_key or settings.MDBLIST_API_KEY
+        self.token = token  # User token for per-user rate limiting
         self.cache = CacheManager()
         self.session: Optional[aiohttp.ClientSession] = None
     
@@ -73,12 +73,14 @@ class MDBListClient:
                 logger.info("MDBList marked unavailable; skipping enrichment (circuit open)")
             return None
         
-        # Get or create shared rate limiter for this service
-        if MDBListClient._rate_limiter is None:
-            MDBListClient._rate_limiter = await RateLimiter.get_limiter(
-                "mdblist", settings.MDBLIST_RATE_LIMIT
+        # Per-user rate limiting if token available, otherwise global
+        if self.token:
+            limiter = await RateLimiter.get_user_limiter(
+                "mdblist", settings.MDBLIST_RATE_LIMIT, self.token
             )
-        await MDBListClient._rate_limiter.acquire()
+        else:
+            limiter = await RateLimiter.get_limiter("mdblist", settings.MDBLIST_RATE_LIMIT)
+        await limiter.acquire()
         
         max_retries = 2
         backoff = 0.5  # base backoff (seconds)

@@ -2,6 +2,8 @@
 Configuration Endpoint
 Serves the configuration UI and generates signed tokens
 """
+import asyncio
+import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -10,8 +12,10 @@ from app.core.config import settings
 from app.models.config import UserConfig
 from app.utils.token import encode_config, decode_config
 from app.services.stremio import StremioClient
+from app.services.background import get_task_manager
 from app.utils.crypto import encrypt_secret
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -21,7 +25,7 @@ class ConfigRequest(BaseModel):
     stremio_username: Optional[str] = None
     stremio_password: Optional[str] = None
     tmdb_api_key: str
-    mdblist_api_key: str
+    mdblist_api_key: Optional[str] = None
     num_rows: int = 5
     min_rating: float = 6.0
     use_loved_items: bool = True
@@ -84,6 +88,10 @@ async def generate_token(request: ConfigRequest):
         base_url = str(settings.BASE_URL).rstrip('/')
         install_url = f"{base_url}/{token}/manifest.json"
         
+        # Trigger async cache pre-warming (non-blocking, improves first-request latency)
+        # This runs in background and doesn't block the response
+        asyncio.create_task(_pre_warm_cache(user_config, token))
+        
         return JSONResponse({
             "success": True,
             "token": token,
@@ -92,6 +100,18 @@ async def generate_token(request: ConfigRequest):
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+async def _pre_warm_cache(config: UserConfig, token: str):
+    """
+    Pre-warm cache after token generation.
+    Runs in background to avoid blocking the token response.
+    """
+    try:
+        task_manager = get_task_manager()
+        await task_manager.warm_cache_for_config(config, token)
+    except Exception as e:
+        logger.warning(f"Cache pre-warm failed (non-blocking): {e}")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -112,8 +132,8 @@ async def configure_page(token: Optional[str] = None):
     
     # Use existing config values if available, otherwise use defaults
     if existing_config:
-        tmdb_default = existing_config.tmdb_api_key
-        mdblist_default = existing_config.mdblist_api_key
+        tmdb_default = existing_config.tmdb_api_key or ""
+        mdblist_default = existing_config.mdblist_api_key or ""
         stremio_loved_default = existing_config.stremio_loved_token or ""
         num_rows_default = existing_config.num_rows
         min_rating_default = existing_config.min_rating
@@ -273,6 +293,19 @@ async def configure_page(token: Optional[str] = None):
         .copy-button:hover {
             background: #45a049;
         }
+        .install-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 10px;
+            font-size: 14px;
+        }
+        .install-button:hover {
+            background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+        }
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
         .error {
             color: #d32f2f;
             font-size: 14px;
@@ -372,9 +405,12 @@ async def configure_page(token: Optional[str] = None):
         <div class="install-url" id="installUrl">
             <h3>✅ Install URL Generated</h3>
             <div class="url-box" id="urlBox"></div>
-            <button class="copy-button" onclick="copyUrl()">Copy to Clipboard</button>
+            <div class="button-row">
+                <button class="copy-button" onclick="copyUrl()">📋 Copy to Clipboard</button>
+                <button class="install-button" id="stremioInstallBtn" onclick="installAddon()">🚀 Install in Stremio</button>
+            </div>
             <div class="helper-text" style="margin-top: 10px;">
-                Copy this URL and add it to Stremio via "Add-ons" → "Install from URL"
+                Click "Install in Stremio" to automatically add this addon, or copy the URL and add it manually via "Add-ons" → "Install from URL"
             </div>
         </div>
     </div>
@@ -389,6 +425,7 @@ async def configure_page(token: Optional[str] = None):
         const loadAuthBtn = document.getElementById('load_auth_btn');
         const usernameInput = document.getElementById('stremio_username');
         const passwordInput = document.getElementById('stremio_password');
+        const stremioInstallBtn = document.getElementById('stremioInstallBtn');
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -495,9 +532,17 @@ async def configure_page(token: Optional[str] = None):
                     const btn = document.querySelector('.copy-button');
                     btn.textContent = '✓ Copied!';
                     setTimeout(() => {
-                        btn.textContent = 'Copy to Clipboard';
+                        btn.textContent = '📋 Copy to Clipboard';
                     }, 2000);
                 });
+            }
+        }
+        
+        function installAddon() {
+            if (window.currentUrl) {
+                // Convert https:// to stremio:// protocol for Stremio app
+                const stremioUrl = window.currentUrl.replace('https://', 'stremio://');
+                window.location.href = stremioUrl;
             }
         }
         

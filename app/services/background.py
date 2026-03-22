@@ -23,15 +23,15 @@ class BackgroundTaskManager:
         self.task: Optional[asyncio.Task] = None
         self.running = False
     
-    def register_config(self, config: UserConfig):
+    def register_config(self, config: UserConfig, token: Optional[str] = None):
         """Register a user config for background cache warming"""
         config_key = config.stremio_auth_key or config.stremio_username_enc or "unknown"
         if config_key not in self.active_configs:
             self.active_configs.add(config_key)
-            self.config_cache[config_key] = config
+            self.config_cache[config_key] = (config, token)  # Store tuple of (config, token)
             logger.info(f"Registered config for background warming: {config_key[:10]}...")
     
-    async def warm_cache_for_config(self, config: UserConfig):
+    async def warm_cache_for_config(self, config: UserConfig, token: Optional[str] = None):
         """
         Warm cache for a single user configuration
         
@@ -40,7 +40,7 @@ class BackgroundTaskManager:
         auth_key_short = (config.stremio_auth_key or config.stremio_username_enc or "unknown")[:10]
         logger.info(f"[Background] Starting cache warming for {auth_key_short}...")
         try:
-            engine = RecommendationEngine(config)
+            engine = RecommendationEngine(config, token=token)
 
             # Prime SWR caches for seeds and watched to avoid re-pulling libraries during warm cycles
             await engine.get_seed_items()
@@ -73,9 +73,10 @@ class BackgroundTaskManager:
         # Warm all registered configs in parallel
         tasks = []
         for config_key in self.active_configs:
-            config = self.config_cache.get(config_key)
-            if config:
-                tasks.append(self.warm_cache_for_config(config))
+            stored = self.config_cache.get(config_key)
+            if stored:
+                config, token = stored
+                tasks.append(self.warm_cache_for_config(config, token))
         
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
