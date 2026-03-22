@@ -249,9 +249,12 @@ class RecommendationEngine:
             item["media_type"] = media_type
             tmdb_id = item.get("id")
             
-            # Check if already has IMDB ID
-            external_ids = item.get("external_ids", {})
-            imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
+            # Check if already has IMDB ID (at top level from TMDB responses)
+            imdb_id = item.get("imdb_id")
+            if not imdb_id:
+                external_ids = item.get("external_ids", {})
+                imdb_id = external_ids.get("imdb_id") if external_ids else None
+            
             if imdb_id:
                 enriched_items.append(item)
                 continue
@@ -289,7 +292,11 @@ class RecommendationEngine:
                             item["release_date"] = details.get("release_date")
                         if not item.get("first_air_date"):
                             item["first_air_date"] = details.get("first_air_date")
-                        item["imdb_id"] = item.get("external_ids", {}).get("imdb_id")
+                        # TMDB returns imdb_id at top level for movies, inside external_ids for TV shows
+                        details_external_ids = details.get("external_ids", {})
+                        item_imdb_id = item.get("imdb_id") or details.get("imdb_id") or details_external_ids.get("imdb_id")
+                        if item_imdb_id:
+                            item["imdb_id"] = item_imdb_id
                 
                 # Cache enriched item
                 cache_key = f"enriched:{tmdb_id}:{media_type}"
