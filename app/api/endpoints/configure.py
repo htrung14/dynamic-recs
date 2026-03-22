@@ -135,6 +135,7 @@ async def configure_page(token: Optional[str] = None):
         tmdb_default = existing_config.tmdb_api_key or ""
         mdblist_default = existing_config.mdblist_api_key or ""
         stremio_loved_default = existing_config.stremio_loved_token or ""
+        stremio_auth_default = existing_config.stremio_auth_key or ""
         num_rows_default = existing_config.num_rows
         min_rating_default = existing_config.min_rating
         use_loved_default = existing_config.use_loved_items
@@ -146,11 +147,10 @@ async def configure_page(token: Optional[str] = None):
         use_loved_default = True
         include_movies_default = True
         include_series_default = True
-    
+        stremio_auth_default = ""
+
     html_content = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
+    <!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic Recommendations - Configure</title>
@@ -326,7 +326,7 @@ async def configure_page(token: Optional[str] = None):
             <div class="form-group">
                 <label for="stremio_auth">Stremio Auth Key</label>
                 <input type="text" id="stremio_auth"
-                       placeholder="Your Stremio authentication key">
+                       placeholder="Your Stremio authentication key" value="__STREMIO_AUTH_DEFAULT__">
                 <div class="helper-text">Option A: paste an existing auth key</div>
             </div>
 
@@ -606,6 +606,7 @@ async def configure_page(token: Optional[str] = None):
     html_content = html_content.replace("__TMDB_DEFAULT__", tmdb_default)
     html_content = html_content.replace("__MDBLIST_DEFAULT__", mdblist_default)
     html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", stremio_loved_default)
+    html_content = html_content.replace("__STREMIO_AUTH_DEFAULT__", stremio_auth_default)
     html_content = html_content.replace("__NUM_ROWS_DEFAULT__", str(num_rows_default))
     html_content = html_content.replace("__MIN_RATING_DEFAULT__", str(min_rating_default))
     html_content = html_content.replace("__USE_LOVED_CHECKED__", "checked" if use_loved_default else "")
