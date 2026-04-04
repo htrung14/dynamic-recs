@@ -98,7 +98,6 @@ class StremioClient:
         
         # Check cache first
         cached = await self.cache.get(cache_key)
-        self.loved_base_url = "https://likes.stremio.com"
         if cached:
             return cached
         
@@ -141,21 +140,6 @@ class StremioClient:
             logger.error(f"Stremio library fetch error: {e}")
             return None
     
-    def extract_loved_items(self, library: Optional[Dict[str, Any]]) -> List[str]:
-        """
-isn        Extract loved/favorited items from library
-        
-        Args:
-            library: Stremio library data (format: {"result": [["id", timestamp], ...]})
-            
-        Returns:
-            List of IMDB IDs
-        """
-        if not library or "result" not in library:
-            return []
-        
-        # Note: Stremio datastoreGet doesn't include "loved" info in simple format
-        return []
     async def fetch_loved_catalog(self, media_type: str, token: Optional[str] = None) -> List[str]:
         """Fetch loved items using the official Stremio loved addon.
 
@@ -181,22 +165,22 @@ isn        Extract loved/favorited items from library
             return cached
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status != 200:
-                        logger.debug(f"Loved catalog fetch returned {resp.status} for {media_type}")
-                        return []
-                    data = await resp.json()
-                    metas = data.get("metas", [])
-                    imdb_ids = []
-                    for m in metas:
-                        imdb_id = m.get("imdb_id") or m.get("id")
-                        if imdb_id and str(imdb_id).startswith("tt"):
-                            imdb_ids.append(imdb_id)
+            session = await self.get_session()
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    logger.debug(f"Loved catalog fetch returned {resp.status} for {media_type}")
+                    return []
+                data = await resp.json()
+                metas = data.get("metas", [])
+                imdb_ids = []
+                for m in metas:
+                    imdb_id = m.get("imdb_id") or m.get("id")
+                    if imdb_id and str(imdb_id).startswith("tt"):
+                        imdb_ids.append(imdb_id)
 
-                    if imdb_ids:
-                        await self.cache.set(cache_key, imdb_ids, ttl=settings.CACHE_TTL_LIBRARY)
-                    return imdb_ids
+                if imdb_ids:
+                    await self.cache.set(cache_key, imdb_ids, ttl=settings.CACHE_TTL_LIBRARY)
+                return imdb_ids
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"Loved catalog fetch failed: {exc}")
             return []

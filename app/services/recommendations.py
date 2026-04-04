@@ -5,7 +5,6 @@ Core recommendation logic combining multiple data sources
 import asyncio
 import logging
 from typing import List, Dict, Optional, Any, Set, Tuple
-from collections import Counter
 from app.services.tmdb import TMDBClient
 from app.services.stremio import StremioClient
 from app.services.cache import CacheManager
@@ -21,7 +20,7 @@ class RecommendationEngine:
     
     def __init__(self, config: UserConfig, token: Optional[str] = None):
         self.config = config
-        self.token = token  # User token for per-user rate limiting
+        self.token = token  # Reserved for future per-user features
         self.tmdb = TMDBClient(config.tmdb_api_key, token=token)
         self.stremio = StremioClient()
         self.cache = CacheManager()
@@ -327,27 +326,28 @@ class RecommendationEngine:
         Returns:
             Scored and ranked items
         """
+        # Frequency scores must be computed before dedup so counts reflect
+        # how many seeds recommended each item (not always 1 after dedup).
+        item_ids = [str(item["id"]) for item in items]
+        freq_scores = score_by_frequency(item_ids)
+
         # Deduplicate by TMDB ID
         items = deduplicate_recommendations(items, key="id")
-        
+
         # Filter out watched items and anime (if configured)
         watched_set = set(watched)
         filtered = []
-        
+
         for item in items:
             external_ids = item.get("external_ids", {})
             imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
-            
+
             if imdb_id not in watched_set:
                 # Filter anime if enabled
                 if self.config.exclude_anime and self._is_anime(item):
                     logger.debug(f"Filtering anime: {item.get('name') or item.get('title')}")
                     continue
                 filtered.append(item)
-        
-        # Calculate frequency scores
-        item_ids = [str(item["id"]) for item in items]
-        freq_scores = score_by_frequency(item_ids)
         
         # Score each item
         scored = []

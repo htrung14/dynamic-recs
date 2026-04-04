@@ -19,7 +19,7 @@ class TMDBClient:
     
     def __init__(self, api_key: Optional[str] = None, token: Optional[str] = None):
         self.api_key = api_key or settings.TMDB_API_KEY
-        self.token = token  # User token for per-user rate limiting
+        self.token = token  # Reserved for future per-user features
         self.cache = CacheManager()
         self.session: Optional[aiohttp.ClientSession] = None
     
