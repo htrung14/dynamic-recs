@@ -240,34 +240,37 @@ class RecommendationEngine:
     async def _attach_external_ids(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ensure each TMDB item has external_ids/imdb_id by fetching details when missing."""
         enriched_items = []
-        items_needing_enrichment = []
-        
-        # Check cache for enriched items first
+        items_needing_cache_check = []
+
+        # First pass: separate items that already have IMDB IDs from those needing cache
         for item in items:
-            # Default media_type so downstream filtering doesn't drop items
             media_type = item.get("media_type") or "movie"
             item["media_type"] = media_type
-            tmdb_id = item.get("id")
-            
-            # Check if already has IMDB ID (at top level from TMDB responses)
+
             imdb_id = item.get("imdb_id")
             if not imdb_id:
                 external_ids = item.get("external_ids", {})
                 imdb_id = external_ids.get("imdb_id") if external_ids else None
-            
+
             if imdb_id:
                 enriched_items.append(item)
-                continue
-            
-            # Check enrichment cache
-            if tmdb_id:
-                cache_key = f"enriched:{tmdb_id}:{media_type}"
-                cached = await self.cache.get(cache_key)
+            else:
+                items_needing_cache_check.append(item)
+
+        # Batch cache lookup for items without IMDB IDs
+        items_needing_enrichment = []
+        if items_needing_cache_check:
+            cache_keys = [
+                f"enriched:{item.get('id')}:{item.get('media_type', 'movie')}"
+                for item in items_needing_cache_check
+            ]
+            cached_values = await self.cache.mget(cache_keys)
+
+            for item, cached in zip(items_needing_cache_check, cached_values):
                 if cached:
                     enriched_items.append(cached)
-                    continue
-            
-            items_needing_enrichment.append(item)
+                else:
+                    items_needing_enrichment.append(item)
         
         # Batch fetch details for items without IMDB IDs
         if items_needing_enrichment:
@@ -536,32 +539,21 @@ class RecommendationEngine:
             logger.info("No recommendations or similars found for seeds; returning empty list")
             return []
 
-        # Ensure external_ids/imdb_id present for poster conversion and scoring
-        # Attach external IDs and fetch MDBList ratings in PARALLEL
-        # (these are independent operations once we have the seed recommendations)
-        logger.debug("Attaching external IDs and fetching ratings in parallel...")
-        
-        external_ids_task = self._attach_external_ids(recommendations)
-        ratings_task = self.enrich_with_ratings(recommendations)
-        
-        external_ids_result, ratings_result = await asyncio.gather(
-            external_ids_task, ratings_task,
-            return_exceptions=True
-        )
-        
-        # Handle any exceptions from parallel tasks
-        if isinstance(external_ids_result, Exception):
-            logger.warning(f"External ID attachment failed: {external_ids_result}, continuing with available data")
-            recommendations = recommendations  # use original
-        else:
-            recommendations = external_ids_result
-        
-        if isinstance(ratings_result, Exception):
-            logger.warning(f"Rating enrichment failed: {ratings_result}, continuing without ratings")
+        # Ensure external_ids/imdb_id are attached BEFORE ratings enrichment.
+        # ratings lookup depends on IMDB IDs populated during external ID enrichment.
+        logger.debug("Attaching external IDs...")
+        try:
+            recommendations = await self._attach_external_ids(recommendations)
+        except Exception as ex:
+            logger.warning(f"External ID attachment failed: {ex}, continuing with available data")
+
+        logger.debug("Fetching ratings...")
+        try:
+            enriched, mdblist_available = await self.enrich_with_ratings(recommendations)
+        except Exception as ex:
+            logger.warning(f"Rating enrichment failed: {ex}, continuing without ratings")
             mdblist_available = False
             enriched = recommendations
-        else:
-            enriched, mdblist_available = ratings_result
         
         if not mdblist_available:
             logger.warning("MDBList unavailable after retries, continuing without ratings")

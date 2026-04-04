@@ -77,22 +77,32 @@ async def get_manifest(
             logger.debug(f"Because you watched (movies) seeds count: {len(watched_only)}")
         if seeds_for_movies:
             logger.debug(f"Movies catalog seeds combined count: {len(seeds_for_movies)}")
+
+        movie_seed_count = min(config.num_rows, len(seeds_for_movies))
+        movie_tmdb_results = []
+        if movie_seed_count:
+            movie_seed_ids = seeds_for_movies[:movie_seed_count]
+            movie_tmdb_results = await asyncio.gather(
+                *[tmdb.find_by_imdb_id(imdb_id) for imdb_id in movie_seed_ids],
+                return_exceptions=True,
+            )
+
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_movies):
                 imdb_id = seeds_for_movies[i]
                 is_loved_seed = i < len(loved_movies)
-                try:
-                    tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
-                    if tmdb_data:
-                        title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Because you watched"
-                        catalog_name = f"{prefix} {title}" if title else f"{prefix}"
-                    else:
-                        prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
-                        catalog_name = f"{prefix} #{i+1}"
-                except Exception as e:
-                    logger.debug(f"Failed to get title for {imdb_id}: {e}")
+
+                tmdb_data = movie_tmdb_results[i] if i < len(movie_tmdb_results) else None
+                if isinstance(tmdb_data, Exception):
+                    logger.debug(f"Failed to get title for {imdb_id}: {tmdb_data}")
+                    prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
+                    catalog_name = f"{prefix} #{i+1}"
+                elif tmdb_data:
+                    title = tmdb_data.get("title") or tmdb_data.get("name", "")
+                    prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Because you watched"
+                    catalog_name = f"{prefix} {title}" if title else f"{prefix}"
+                else:
                     prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
                     catalog_name = f"{prefix} #{i+1}"
             else:
@@ -119,22 +129,32 @@ async def get_manifest(
             logger.debug(f"Because you watched (series) seeds count: {len(watched_only_series)}")
         if seeds_for_series:
             logger.debug(f"Series catalog seeds combined count: {len(seeds_for_series)}")
+
+        series_seed_count = min(config.num_rows, len(seeds_for_series))
+        series_tmdb_results = []
+        if series_seed_count:
+            series_seed_ids = seeds_for_series[:series_seed_count]
+            series_tmdb_results = await asyncio.gather(
+                *[tmdb.find_by_imdb_id(imdb_id) for imdb_id in series_seed_ids],
+                return_exceptions=True,
+            )
+
         for i in range(config.num_rows):
             # Get title for this seed if available
             if i < len(seeds_for_series):
                 imdb_id = seeds_for_series[i]
                 is_loved_seed = i < len(loved_series)
-                try:
-                    tmdb_data = await tmdb.find_by_imdb_id(imdb_id)
-                    if tmdb_data:
-                        title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                        prefix = "📺 Because you loved" if is_loved_seed else "📺 Because you watched"
-                        catalog_name = f"{prefix} {title}" if title else f"{prefix}"
-                    else:
-                        prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
-                        catalog_name = f"{prefix} #{i+1}"
-                except Exception as e:
-                    logger.debug(f"Failed to get title for {imdb_id}: {e}")
+
+                tmdb_data = series_tmdb_results[i] if i < len(series_tmdb_results) else None
+                if isinstance(tmdb_data, Exception):
+                    logger.debug(f"Failed to get title for {imdb_id}: {tmdb_data}")
+                    prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
+                    catalog_name = f"{prefix} #{i+1}"
+                elif tmdb_data:
+                    title = tmdb_data.get("title") or tmdb_data.get("name", "")
+                    prefix = "📺 Because you loved" if is_loved_seed else "📺 Because you watched"
+                    catalog_name = f"{prefix} {title}" if title else f"{prefix}"
+                else:
                     prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
                     catalog_name = f"{prefix} #{i+1}"
             else:

@@ -423,18 +423,22 @@ class TMDBClient:
         """
         results = {}
         uncached_items = []
-        
-        # Check cache for all items first
+
+        normalized_items = []
         for item in items:
             tmdb_id = item.get("id")
             media_type = item.get("media_type", "movie")
-            
+
             if not tmdb_id:
                 continue
-            
-            cache_key = f"meta:{tmdb_id}:{media_type}:tmdb"
-            cached = await self.cache.get(cache_key)
-            
+
+            normalized_items.append((tmdb_id, media_type))
+
+        # Check cache for all items first in one Redis round-trip
+        cache_keys = [f"meta:{tmdb_id}:{media_type}:tmdb" for tmdb_id, media_type in normalized_items]
+        cached_values = await self.cache.mget(cache_keys)
+
+        for (tmdb_id, media_type), cached in zip(normalized_items, cached_values):
             if cached:
                 results[tmdb_id] = cached
             else:

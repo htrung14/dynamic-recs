@@ -34,7 +34,7 @@ class MDBListClient:
         """Get or create aiohttp session"""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30)  # Increased from 10s to 30s
+                timeout=aiohttp.ClientTimeout(total=10)
             )
         return self.session
     
@@ -157,11 +157,12 @@ class MDBListClient:
         """
         results = {}
         uncached_ids = []
-        
-        # Check cache first for all IDs
-        for imdb_id in imdb_ids:
-            cache_key = f"meta:{imdb_id}:mdblist"
-            cached = await self.cache.get(cache_key)
+
+        # Check cache first for all IDs in one Redis round-trip
+        cache_keys = [f"meta:{imdb_id}:mdblist" for imdb_id in imdb_ids]
+        cached_values = await self.cache.mget(cache_keys)
+
+        for imdb_id, cached in zip(imdb_ids, cached_values):
             if cached:
                 results[imdb_id] = cached
             else:

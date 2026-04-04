@@ -195,6 +195,37 @@ class CacheManager:
         except Exception as e:
             logger.error(f"Cache exists error for key {key}: {e}")
             return False
+
+    async def mget(self, keys: list) -> list:
+        """
+        Get multiple values from cache in a single round-trip.
+
+        Returns a list of the same length as *keys*, with None for misses.
+        SWR envelopes are unwrapped transparently (same as get()).
+        """
+        if not keys:
+            return []
+        try:
+            client = await self.get_client()
+            raw_values = await client.mget(*keys)
+
+            results = []
+            for value in raw_values:
+                if value is None:
+                    results.append(None)
+                    continue
+                try:
+                    parsed = json.loads(value)
+                    if isinstance(parsed, dict) and "value" in parsed and "fresh_until" in parsed:
+                        results.append(parsed.get("value"))
+                    else:
+                        results.append(parsed)
+                except (json.JSONDecodeError, TypeError):
+                    results.append(None)
+            return results
+        except Exception as e:
+            logger.error(f"Cache mget error: {e}")
+            return [None] * len(keys)
     
     async def close(self):
         """Close Redis connection"""
