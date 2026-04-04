@@ -4,7 +4,7 @@ Core recommendation logic combining multiple data sources
 """
 import asyncio
 import logging
-from typing import List, Dict, Optional, Any, Set
+from typing import List, Dict, Optional, Any, Set, Tuple
 from collections import Counter
 from app.services.tmdb import TMDBClient
 from app.services.stremio import StremioClient
