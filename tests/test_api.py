@@ -42,7 +42,6 @@ async def test_generate_token_endpoint():
     config_request = {
         "stremio_auth_key": "test_auth_key",
         "tmdb_api_key": "test_tmdb_key",
-        "mdblist_api_key": "test_mdblist_key",
         "num_rows": 5,
         "min_rating": 6.0,
         "use_loved_items": True,
@@ -124,7 +123,6 @@ async def test_manifest_movies_only():
         stremio_password_enc="dGVzdF9wYXNzd29yZA==",
         stremio_loved_token="test_loved_token",
         tmdb_api_key="7c1d4ee5a7063e9f116b6ca2a0850143",
-        mdblist_api_key="testfake123456789abcdef",
         num_rows=3,
         min_rating=6.0,
         use_loved_items=True,

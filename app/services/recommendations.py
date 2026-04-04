@@ -4,15 +4,14 @@ Core recommendation logic combining multiple data sources
 """
 import asyncio
 import logging
-from typing import List, Dict, Optional, Any, Set, Tuple
+from typing import List, Dict, Optional, Any, Set
 from collections import Counter
 from app.services.tmdb import TMDBClient
-from app.services.mdblist import MDBListClient
 from app.services.stremio import StremioClient
 from app.services.cache import CacheManager
 from app.models.config import UserConfig
 from app.core.config import settings
-from app.utils.helpers import deduplicate_recommendations, score_by_frequency, merge_ratings
+from app.utils.helpers import deduplicate_recommendations, score_by_frequency
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +23,12 @@ class RecommendationEngine:
         self.config = config
         self.token = token  # User token for per-user rate limiting
         self.tmdb = TMDBClient(config.tmdb_api_key, token=token)
-        self.mdblist = MDBListClient(config.mdblist_api_key, token=token)
         self.stremio = StremioClient()
         self.cache = CacheManager()
     
     async def close(self):
         """Close all client connections"""
         await self.tmdb.close()
-        await self.mdblist.close()
         await self.stremio.close()
     
     def _is_anime(self, item: Dict[str, Any]) -> bool:
@@ -308,62 +305,11 @@ class RecommendationEngine:
         
         return enriched_items
     
-    async def enrich_with_ratings(
-        self,
-        items: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], bool]:
-        """
-        Enrich items with ratings from MDBList
-        
-        Args:
-            items: List of TMDB recommendation items
-            
-        Returns:
-            Tuple of (items with ratings, mdblist_available flag)
-        """
-        # Skip MDBList entirely if no API key configured
-        if not self.config.mdblist_api_key:
-            # Use TMDB ratings only, no MDBList enrichment
-            for item in items:
-                item["merged_rating"] = item.get("vote_average", 0.0)
-            return items, False
-        
-        # Extract IMDB IDs
-        imdb_ids = []
+    def _apply_ratings(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Set merged_rating from TMDB vote_average for each item."""
         for item in items:
-            external_ids = item.get("external_ids", {})
-            imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
-            if imdb_id:
-                imdb_ids.append(imdb_id)
-        
-        # Fetch ratings in batch
-        ratings = await self.mdblist.batch_ratings(imdb_ids)
-        
-        # Check if MDBList is available (not all None)
-        mdblist_available = any(rating is not None for rating in ratings.values())
-        
-        # Merge ratings into items
-        enriched = []
-        for item in items:
-            external_ids = item.get("external_ids", {})
-            imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
-            
-            if imdb_id and imdb_id in ratings:
-                rating_data = ratings[imdb_id]
-                mdblist_rating = self.mdblist.extract_rating(rating_data)
-                
-                item["mdblist_rating"] = mdblist_rating
-                item["imdb_rating"] = item.get("vote_average", 0.0)
-                
-                # Calculate merged rating
-                item["merged_rating"] = merge_ratings(
-                    imdb_rating=mdblist_rating,
-                    tmdb_rating=item.get("vote_average", 0.0)
-                )
-            
-            enriched.append(item)
-        
-        return enriched, mdblist_available
+            item["merged_rating"] = item.get("vote_average", 0.0)
+        return items
     
     async def score_and_rank(
         self,
@@ -408,10 +354,6 @@ class RecommendationEngine:
         seed_genres = seed_genres or set()
         for item in filtered:
             item_id = str(item["id"])
-            
-            # Fallback to TMDB vote_average when mdblist rating is missing
-            if item.get("merged_rating") is None:
-                item["merged_rating"] = item.get("vote_average", 0.0)
             
             freq_score = freq_scores.get(item_id, 0.0)
             rating_score = item.get("merged_rating", 0.0) / 10.0
@@ -547,16 +489,7 @@ class RecommendationEngine:
         except Exception as ex:
             logger.warning(f"External ID attachment failed: {ex}, continuing with available data")
 
-        logger.debug("Fetching ratings...")
-        try:
-            enriched, mdblist_available = await self.enrich_with_ratings(recommendations)
-        except Exception as ex:
-            logger.warning(f"Rating enrichment failed: {ex}, continuing without ratings")
-            mdblist_available = False
-            enriched = recommendations
-        
-        if not mdblist_available:
-            logger.warning("MDBList unavailable after retries, continuing without ratings")
+        enriched = self._apply_ratings(recommendations)
 
         # Score and rank
         logger.debug("Scoring and ranking recommendations...")

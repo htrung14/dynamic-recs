@@ -25,7 +25,6 @@ class ConfigRequest(BaseModel):
     stremio_username: Optional[str] = None
     stremio_password: Optional[str] = None
     tmdb_api_key: str
-    mdblist_api_key: Optional[str] = None
     num_rows: int = 5
     min_rating: float = 6.0
     use_loved_items: bool = True
@@ -71,7 +70,6 @@ async def generate_token(request: ConfigRequest):
             stremio_username_enc=username_enc,
             stremio_password_enc=password_enc,
             tmdb_api_key=request.tmdb_api_key,
-            mdblist_api_key=request.mdblist_api_key,
             num_rows=request.num_rows,
             min_rating=request.min_rating,
             use_loved_items=request.use_loved_items,
@@ -127,13 +125,11 @@ async def configure_page(token: Optional[str] = None):
     
     # Get server defaults for API keys
     tmdb_default = settings.TMDB_API_KEY or ""
-    mdblist_default = settings.MDBLIST_API_KEY or ""
     stremio_loved_default = settings.STREMIO_LOVED_TOKEN or ""
-    
+
     # Use existing config values if available, otherwise use defaults
     if existing_config:
         tmdb_default = existing_config.tmdb_api_key or ""
-        mdblist_default = existing_config.mdblist_api_key or ""
         stremio_loved_default = existing_config.stremio_loved_token or ""
         stremio_auth_default = existing_config.stremio_auth_key or ""
         num_rows_default = existing_config.num_rows
@@ -350,11 +346,6 @@ async def configure_page(token: Optional[str] = None):
             </div>
             
             <div class="form-group">
-                  <label for="mdblist_key">MDBList API Key *</label>
-                  <input type="text" id="mdblist_key" required
-                      placeholder="Your MDBList API key" value="__MDBLIST_DEFAULT__">
-                  <div class="helper-text">Required - Get one at mdblist.com/api</div>
-
                   <label for="stremio_loved_token">Stremio Loved Token or URL (optional)</label>
                   <input type="text" id="stremio_loved_token"
                       placeholder="Full loved add-on URL or token" value="__STREMIO_LOVED_DEFAULT__">
@@ -471,7 +462,6 @@ async def configure_page(token: Optional[str] = None):
                 stremio_username: document.getElementById('stremio_username').value.trim(),
                 stremio_password: document.getElementById('stremio_password').value,
                 tmdb_api_key: document.getElementById('tmdb_key').value.trim(),
-                mdblist_api_key: document.getElementById('mdblist_key').value.trim(),
                 stremio_loved_token: normalizeLovedToken(document.getElementById('stremio_loved_token').value),
                 num_rows: parseInt(document.getElementById('num_rows').value),
                 min_rating: parseFloat(document.getElementById('min_rating').value),
@@ -491,12 +481,7 @@ async def configure_page(token: Optional[str] = None):
                 showError('TMDB API Key is required');
                 return;
             }
-            
-            if (!config.mdblist_api_key) {
-                showError('MDBList API Key is required');
-                return;
-            }
-            
+
             try {
                 // Call server-side endpoint to generate signed token
                 const response = await fetch('/generate-token', {
@@ -604,7 +589,6 @@ async def configure_page(token: Optional[str] = None):
     
     # Replace placeholders with actual values
     html_content = html_content.replace("__TMDB_DEFAULT__", tmdb_default)
-    html_content = html_content.replace("__MDBLIST_DEFAULT__", mdblist_default)
     html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", stremio_loved_default)
     html_content = html_content.replace("__STREMIO_AUTH_DEFAULT__", stremio_auth_default)
     html_content = html_content.replace("__NUM_ROWS_DEFAULT__", str(num_rows_default))

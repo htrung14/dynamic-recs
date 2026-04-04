@@ -5,7 +5,6 @@ import pytest
 from app.utils.helpers import (
     deduplicate_recommendations,
     score_by_frequency,
-    merge_ratings,
     sanitize_title
 )
 
@@ -60,37 +59,6 @@ def test_score_by_frequency_custom_max():
     assert scores["a"] == 10.0
     assert scores["b"] == 5.0
 
-
-def test_merge_ratings_all_sources():
-    """Test merging ratings from all sources"""
-    rating = merge_ratings(
-        imdb_rating=8.5,
-        tmdb_rating=8.0,
-        mdblist_rating=8.8
-    )
-    
-    # Weighted average: 0.4*8.5 + 0.3*8.0 + 0.3*8.8
-    expected = (0.4 * 8.5 + 0.3 * 8.0 + 0.3 * 8.8)
-    assert rating == pytest.approx(expected, rel=0.01)
-
-
-def test_merge_ratings_partial_sources():
-    """Test merging ratings with missing sources"""
-    rating = merge_ratings(
-        imdb_rating=8.5,
-        tmdb_rating=8.0,
-        mdblist_rating=0.0
-    )
-    
-    # Should only use imdb and tmdb
-    expected = (0.4 * 8.5 + 0.3 * 8.0) / 0.7
-    assert rating == pytest.approx(expected, rel=0.01)
-
-
-def test_merge_ratings_no_sources():
-    """Test merging ratings with no sources"""
-    rating = merge_ratings()
-    assert rating == 0.0
 
 
 def test_sanitize_title():

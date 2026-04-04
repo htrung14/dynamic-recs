@@ -16,7 +16,6 @@ def sample_config():
         stremio_password_enc="cGFzc3dvcmRfZmFrZQ==",
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",
-        mdblist_api_key="fake1234567890abcdefghijklmnop",
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,
@@ -66,7 +65,6 @@ def test_register_multiple_configs():
         stremio_password_enc="cGFzc3dvcmQxX2Zha2U=",
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="9a3b6df7b9285e1b338a8ca4b2970365",
-        mdblist_api_key="fake1234567890abcdefgh1",
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,
@@ -80,7 +78,6 @@ def test_register_multiple_configs():
         stremio_password_enc="cGFzc3dvcmQyX2Zha2U=",
         stremio_loved_token="c3RyZW1pb19sb3ZlZF90b2tlbl9mYWtlX3ZhbHVl",  # Fake Base64-like loved token
         tmdb_api_key="8b2c5de6a8174d0c227b7da3a1860254",
-        mdblist_api_key="fake1234567890abcdefgh2",
         num_rows=5,
         min_rating=6.0,
         use_loved_items=True,

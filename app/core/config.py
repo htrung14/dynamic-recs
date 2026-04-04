@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     
     # API Keys (server defaults - users must provide if not set)
     TMDB_API_KEY: Optional[str] = None
-    MDBLIST_API_KEY: Optional[str] = None
     STREMIO_LOVED_TOKEN: Optional[str] = None  # Token for official Stremio loved addon (optional)
     
     # Redis
@@ -45,9 +44,7 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_API_CALLS: int = 35  # Increased from 10 for faster cold start
     
     # API Rate Limits (requests per second)
-    # Optimized for performance while staying within API limits
     TMDB_RATE_LIMIT: int = 50  # TMDB allows 50/sec
-    MDBLIST_RATE_LIMIT: int = 60  # MDBList allows 100k/day, 30 req/s = ~2.6M/day capacity
     STREMIO_RATE_LIMIT: int = 0  # No rate limiting for Stremio (personal library access)
     
     # Development

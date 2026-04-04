@@ -58,45 +58,6 @@ def score_by_frequency(
     }
 
 
-def merge_ratings(
-    imdb_rating: float = 0.0,
-    tmdb_rating: float = 0.0,
-    mdblist_rating: float = 0.0
-) -> float:
-    """
-    Merge multiple ratings into a single score
-    
-    Args:
-        imdb_rating: IMDB rating (0-10)
-        tmdb_rating: TMDB rating (0-10)
-        mdblist_rating: MDBList aggregate rating (0-10)
-        
-    Returns:
-        Weighted average rating
-    """
-    ratings = []
-    weights = []
-    
-    if imdb_rating > 0:
-        ratings.append(imdb_rating)
-        weights.append(0.4)
-    
-    if tmdb_rating > 0:
-        ratings.append(tmdb_rating)
-        weights.append(0.3)
-    
-    if mdblist_rating > 0:
-        ratings.append(mdblist_rating)
-        weights.append(0.3)
-    
-    if not ratings:
-        return 0.0
-    
-    total_weight = sum(weights)
-    weighted_sum = sum(r * w for r, w in zip(ratings, weights))
-    
-    return weighted_sum / total_weight
-
 
 def sanitize_title(title: str) -> str:
     """

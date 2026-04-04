@@ -13,13 +13,10 @@ from app.services.recommendations import RecommendationEngine
 
 STREMIO_AUTH = os.environ.get("STREMIO_AUTH_KEY")
 TMDB_KEY = os.environ.get("TMDB_API_KEY") or settings.TMDB_API_KEY
-MDBLIST_KEY = os.environ.get("MDBLIST_API_KEY") or settings.MDBLIST_API_KEY
-
-if not (STREMIO_AUTH and TMDB_KEY and MDBLIST_KEY):
+if not (STREMIO_AUTH and TMDB_KEY):
     pytest.skip("Integration credentials not provided; skipping loved items test", allow_module_level=True)
 
 tmdb_api_key = cast(str, TMDB_KEY)
-mdblist_api_key = cast(str, MDBLIST_KEY)
 stremio_auth_key = cast(str, STREMIO_AUTH)
 
 async def test_loved_items_priority():
@@ -39,7 +36,6 @@ async def test_loved_items_priority():
         stremio_password_enc=None,
         stremio_loved_token=os.environ.get("STREMIO_LOVED_TOKEN"),
         tmdb_api_key=tmdb_api_key,
-        mdblist_api_key=mdblist_api_key,
         num_rows=5,
         use_loved_items=True,  # ENABLED
         min_rating=6.0,
@@ -93,7 +89,6 @@ async def test_loved_items_priority():
         stremio_password_enc=None,
         stremio_loved_token=None,
         tmdb_api_key=tmdb_api_key,
-        mdblist_api_key=mdblist_api_key,
         num_rows=5,
         use_loved_items=False,  # DISABLED
         min_rating=6.0,
