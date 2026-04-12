@@ -87,19 +87,19 @@ async def get_manifest(
     finally:
         await engine.close()
 
-    top_3_genres = user_genres[:3]
+    top_genres = user_genres[:2]  # Keep it to 2 genre rows to avoid clutter
 
     if config.include_movies:
         catalogs.append(ManifestCatalog(type="movie", id="gems_movie", name="💎 Hidden Gems"))
         catalogs.append(ManifestCatalog(type="movie", id="new_movie", name="🆕 New Releases For You"))
-        for gid in top_3_genres:
+        for gid in top_genres:
             gname = TMDB_GENRE_NAMES.get(gid, f"Genre {gid}")
             catalogs.append(ManifestCatalog(type="movie", id=f"genre_{gid}_movie", name=f"🎯 {gname} For You"))
 
     if config.include_series:
         catalogs.append(ManifestCatalog(type="series", id="gems_series", name="💎 Hidden Gems"))
         catalogs.append(ManifestCatalog(type="series", id="new_series", name="🆕 New Releases For You"))
-        for gid in top_3_genres:
+        for gid in top_genres:
             gname = TMDB_GENRE_NAMES.get(gid, f"Genre {gid}")
             catalogs.append(ManifestCatalog(type="series", id=f"genre_{gid}_series", name=f"🎯 {gname} For You"))
 
