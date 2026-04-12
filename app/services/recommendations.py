@@ -382,22 +382,23 @@ class RecommendationEngine:
 
             # Build genre frequency counter with recency weighting
             # Most recent item gets weight 1.0, oldest gets 0.3
-            genre_counter: Counter = Counter()
+            genre_counter: dict[int, float] = {}
             n = len(tmdb_items)
             for idx, item in enumerate(tmdb_items):
                 recency_weight = 0.3 + 0.7 * ((n - idx) / n)
                 genre_ids = item.get("genre_ids", [])
-                details = details_map.get(item.get("id"))
+                tmdb_id = item.get("id")
+                details = details_map.get(tmdb_id) if tmdb_id else None
                 if not genre_ids and details:
                     genre_ids = [g.get("id") for g in details.get("genres", []) if g.get("id")]
                 for gid in genre_ids:
                     if isinstance(gid, int):
-                        genre_counter[gid] += recency_weight
+                        genre_counter[gid] = genre_counter.get(gid, 0.0) + recency_weight
 
             # Normalise to 0-1 weight vector
             max_weight = max(genre_counter.values()) if genre_counter else 1.0
             genre_weights = {gid: w / max_weight for gid, w in genre_counter.items()}
-            top_genres = [gid for gid, _ in genre_counter.most_common(5)]
+            top_genres = sorted(genre_counter, key=lambda g: genre_counter[g], reverse=True)[:5]
 
             # Fetch keywords for top 15 items (most recent) in parallel
             kw_sample = tmdb_items[:15]
