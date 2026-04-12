@@ -45,8 +45,11 @@ def main():
     include_series = input("7. Include series? (Y/n): ").strip().lower()
     include_series = include_series != 'n'
 
+    exclude_anime = input("8. Exclude anime? (Y/n): ").strip().lower()
+    exclude_anime = exclude_anime != 'n'
+
     default_loved = settings.STREMIO_LOVED_TOKEN or ""
-    loved_token = input("8. Stremio loved token (optional): ").strip()
+    loved_token = input("9. Stremio loved token (optional): ").strip()
     if not loved_token and default_loved:
         loved_token = default_loved
 
@@ -62,7 +65,8 @@ def main():
             min_rating=min_rating,
             use_loved_items=use_loved,
             include_movies=include_movies,
-            include_series=include_series
+            include_series=include_series,
+            exclude_anime=exclude_anime,
         )
         
         # Generate signed token
