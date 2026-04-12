@@ -309,54 +309,27 @@ class TMDBClient:
             stale_ttl=settings.CACHE_TTL_RECOMMENDATIONS * 3,
         )
     
-    async def discover_hidden_gems(
+    async def _discover_progressive(
         self,
         media_type: str,
-        genre_ids: List[int],
-        keyword_ids: Optional[List[int]] = None,
-        page: int = 1,
+        queries: List[dict],
+        cache_key: str,
+        target: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Hidden gems: keyword AND-groups + AND genres, low popularity."""
-        sorted_gids = sorted(genre_ids)
-        sorted_kids = sorted(keyword_ids or [])
-        cache_key = f"discover:gems:v2:{media_type}:g{'_'.join(map(str, sorted_gids))}:k{'_'.join(map(str, sorted_kids))}"
-
+        """Run a chain of discover queries from strictest to broadest, stopping when target met."""
         async def build() -> List[Dict[str, Any]]:
             endpoint = f"/discover/{media_type}"
             all_results: List[Dict[str, Any]] = []
             seen_ids: set = set()
-
-            # Run multiple targeted queries with keyword AND-pairs for variety
-            kw_pairs = []
-            kids = keyword_ids or []
-            if len(kids) >= 2:
-                # Create AND pairs: (kw0 AND kw1), (kw2 AND kw3), etc.
-                for i in range(0, min(len(kids), 8), 2):
-                    if i + 1 < len(kids):
-                        kw_pairs.append(f"{kids[i]},{kids[i+1]}")
-                    else:
-                        kw_pairs.append(str(kids[i]))
-            elif kids:
-                kw_pairs.append(str(kids[0]))
-
-            for kw_filter in (kw_pairs or [""]):
-                params = {
-                    "page": 1,
-                    "with_genres": ",".join(map(str, genre_ids[:2])),
-                    "vote_average.gte": 7.0,
-                    "vote_count.gte": 20,
-                    "vote_count.lte": 500,
-                    "sort_by": "vote_average.desc",
-                }
-                if kw_filter:
-                    params["with_keywords"] = kw_filter
+            for params in queries:
                 response = await self._request(endpoint, params)
                 for item in (response or {}).get("results", []):
                     if item.get("id") not in seen_ids:
                         seen_ids.add(item["id"])
                         item.setdefault("media_type", media_type)
                         all_results.append(item)
-
+                if len(all_results) >= target:
+                    break
             return all_results
 
         return await self.cache.stale_while_revalidate(
@@ -365,6 +338,40 @@ class TMDBClient:
             ttl=settings.CACHE_TTL_CATALOG,
             stale_ttl=settings.CACHE_TTL_CATALOG * 3,
         )
+
+    async def discover_hidden_gems(
+        self,
+        media_type: str,
+        genre_ids: List[int],
+        keyword_ids: Optional[List[int]] = None,
+        page: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """Hidden gems with progressive relaxation: strict → broad."""
+        sorted_gids = sorted(genre_ids)
+        sorted_kids = sorted(keyword_ids or [])
+        cache_key = f"discover:gems:v3:{media_type}:g{'_'.join(map(str, sorted_gids))}:k{'_'.join(map(str, sorted_kids))}"
+        kids = keyword_ids or []
+        base = {"vote_average.gte": 7.0, "sort_by": "vote_average.desc", "page": 1}
+
+        queries = []
+        # Tier 1: AND genres + OR keywords + low popularity
+        if kids:
+            queries.append({**base, "with_genres": ",".join(map(str, genre_ids[:2])),
+                            "with_keywords": "|".join(map(str, kids[:6])),
+                            "vote_count.gte": 20, "vote_count.lte": 500})
+        # Tier 2: AND genres + no keywords + low popularity
+        queries.append({**base, "with_genres": ",".join(map(str, genre_ids[:2])),
+                        "vote_count.gte": 20, "vote_count.lte": 500})
+        # Tier 3: single top genre + OR keywords + medium popularity
+        if kids:
+            queries.append({**base, "with_genres": str(genre_ids[0]),
+                            "with_keywords": "|".join(map(str, kids[:6])),
+                            "vote_count.gte": 20, "vote_count.lte": 2000})
+        # Tier 4: single top genre + low popularity (broadest)
+        queries.append({**base, "with_genres": str(genre_ids[0]),
+                        "vote_count.gte": 20, "vote_count.lte": 2000})
+
+        return await self._discover_progressive(media_type, queries, cache_key)
 
     async def discover_new_releases(
         self,
@@ -373,69 +380,38 @@ class TMDBClient:
         keyword_ids: Optional[List[int]] = None,
         page: int = 1,
     ) -> List[Dict[str, Any]]:
-        """New releases matching user's keywords + AND genres."""
+        """New releases with progressive relaxation."""
         from datetime import datetime, timedelta
 
         today = datetime.now().strftime("%Y-%m-%d")
         ago_90 = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+        ago_180 = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
         sorted_gids = sorted(genre_ids)
         sorted_kids = sorted(keyword_ids or [])
-        cache_key = f"discover:new:v2:{media_type}:g{'_'.join(map(str, sorted_gids))}:k{'_'.join(map(str, sorted_kids))}"
+        cache_key = f"discover:new:v3:{media_type}:g{'_'.join(map(str, sorted_gids))}:k{'_'.join(map(str, sorted_kids))}"
 
-        date_gte_key = "primary_release_date.gte" if media_type == "movie" else "first_air_date.gte"
-        date_lte_key = "primary_release_date.lte" if media_type == "movie" else "first_air_date.lte"
+        d_gte = "primary_release_date.gte" if media_type == "movie" else "first_air_date.gte"
+        d_lte = "primary_release_date.lte" if media_type == "movie" else "first_air_date.lte"
+        kids = keyword_ids or []
+        base = {"sort_by": "popularity.desc", "vote_count.gte": 5, "page": 1}
 
-        async def build() -> List[Dict[str, Any]]:
-            endpoint = f"/discover/{media_type}"
-            all_results: List[Dict[str, Any]] = []
-            seen_ids: set = set()
-            kids = keyword_ids or []
+        queries = []
+        # Tier 1: AND genres + keywords + 90 days
+        if kids:
+            queries.append({**base, "with_genres": ",".join(map(str, genre_ids[:2])),
+                            "with_keywords": "|".join(map(str, kids[:6])),
+                            d_gte: ago_90, d_lte: today})
+        # Tier 2: AND genres + 90 days (no keywords)
+        queries.append({**base, "with_genres": ",".join(map(str, genre_ids[:2])),
+                        d_gte: ago_90, d_lte: today})
+        # Tier 3: single genre + 90 days
+        queries.append({**base, "with_genres": str(genre_ids[0]),
+                        d_gte: ago_90, d_lte: today})
+        # Tier 4: single genre + 180 days (wider window)
+        queries.append({**base, "with_genres": str(genre_ids[0]),
+                        d_gte: ago_180, d_lte: today})
 
-            # First: tight query with AND keywords + AND genres
-            if kids:
-                params = {
-                    "page": 1,
-                    "with_genres": ",".join(map(str, genre_ids[:2])),
-                    "with_keywords": ",".join(map(str, kids[:3])),
-                    date_gte_key: ago_90,
-                    date_lte_key: today,
-                    "vote_count.gte": 5,
-                    "sort_by": "popularity.desc",
-                }
-                response = await self._request(endpoint, params)
-                for item in (response or {}).get("results", []):
-                    if item.get("id") not in seen_ids:
-                        seen_ids.add(item["id"])
-                        item.setdefault("media_type", media_type)
-                        all_results.append(item)
-
-            # Backfill with OR keywords if not enough
-            if len(all_results) < 20:
-                params = {
-                    "page": 1,
-                    "with_genres": ",".join(map(str, genre_ids[:2])),
-                    date_gte_key: ago_90,
-                    date_lte_key: today,
-                    "vote_count.gte": 5,
-                    "sort_by": "popularity.desc",
-                }
-                if kids:
-                    params["with_keywords"] = "|".join(map(str, kids[:6]))
-                response = await self._request(endpoint, params)
-                for item in (response or {}).get("results", []):
-                    if item.get("id") not in seen_ids:
-                        seen_ids.add(item["id"])
-                        item.setdefault("media_type", media_type)
-                        all_results.append(item)
-
-            return all_results
-
-        return await self.cache.stale_while_revalidate(
-            key=cache_key,
-            build_fn=build,
-            ttl=settings.CACHE_TTL_CATALOG,
-            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
-        )
+        return await self._discover_progressive(media_type, queries, cache_key)
 
     async def discover_genre_picks(
         self,
@@ -444,53 +420,24 @@ class TMDBClient:
         keyword_ids: Optional[List[int]] = None,
         page: int = 1,
     ) -> List[Dict[str, Any]]:
-        """Genre picks narrowed by user's keyword AND-pairs."""
+        """Genre picks with progressive relaxation."""
         sorted_kids = sorted(keyword_ids or [])
-        cache_key = f"discover:genre:v2:{media_type}:{genre_id}:k{'_'.join(map(str, sorted_kids))}"
+        cache_key = f"discover:genre:v3:{media_type}:{genre_id}:k{'_'.join(map(str, sorted_kids))}"
+        kids = keyword_ids or []
+        base = {"with_genres": str(genre_id), "vote_average.gte": 7.0,
+                "sort_by": "vote_average.desc", "page": 1}
 
-        async def build() -> List[Dict[str, Any]]:
-            endpoint = f"/discover/{media_type}"
-            all_results: List[Dict[str, Any]] = []
-            seen_ids: set = set()
-            kids = keyword_ids or []
+        queries = []
+        # Tier 1: genre + OR keywords + capped popularity
+        if kids:
+            queries.append({**base, "with_keywords": "|".join(map(str, kids[:6])),
+                            "vote_count.gte": 30, "vote_count.lte": 3000})
+        # Tier 2: genre + capped popularity (no keywords)
+        queries.append({**base, "vote_count.gte": 30, "vote_count.lte": 3000})
+        # Tier 3: genre only (no caps)
+        queries.append({**base, "vote_count.gte": 50})
 
-            # Targeted: genre + AND keyword pairs
-            kw_pairs = []
-            if len(kids) >= 2:
-                for i in range(0, min(len(kids), 6), 2):
-                    if i + 1 < len(kids):
-                        kw_pairs.append(f"{kids[i]},{kids[i+1]}")
-                    else:
-                        kw_pairs.append(str(kids[i]))
-            elif kids:
-                kw_pairs.append(str(kids[0]))
-
-            for kw_filter in (kw_pairs or [""]):
-                params = {
-                    "page": 1,
-                    "with_genres": str(genre_id),
-                    "vote_average.gte": 7.0,
-                    "vote_count.gte": 30,
-                    "vote_count.lte": 3000,
-                    "sort_by": "vote_average.desc",
-                }
-                if kw_filter:
-                    params["with_keywords"] = kw_filter
-                response = await self._request(endpoint, params)
-                for item in (response or {}).get("results", []):
-                    if item.get("id") not in seen_ids:
-                        seen_ids.add(item["id"])
-                        item.setdefault("media_type", media_type)
-                        all_results.append(item)
-
-            return all_results
-
-        return await self.cache.stale_while_revalidate(
-            key=cache_key,
-            build_fn=build,
-            ttl=settings.CACHE_TTL_CATALOG,
-            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
-        )
+        return await self._discover_progressive(media_type, queries, cache_key)
 
     async def find_by_imdb_id(self, imdb_id: str) -> Optional[Dict[str, Any]]:
         """
