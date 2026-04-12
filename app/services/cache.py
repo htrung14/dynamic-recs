@@ -227,6 +227,22 @@ class CacheManager:
             logger.error(f"Cache mget error: {e}")
             return [None] * len(keys)
     
+    async def mset(self, mapping: dict, ttl: int) -> bool:
+        """Set multiple key-value pairs in a single pipeline round-trip."""
+        if not mapping:
+            return True
+        try:
+            client = await self.get_client()
+            pipe = client.pipeline()
+            for key, value in mapping.items():
+                serialized = json.dumps(value)
+                pipe.setex(key, ttl, serialized)
+            await pipe.execute()
+            return True
+        except Exception as e:
+            logger.error(f"Cache mset error: {e}")
+            return False
+
     async def close(self):
         """Close Redis connection"""
         if self._redis_client:

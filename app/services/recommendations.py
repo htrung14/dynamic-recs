@@ -80,18 +80,31 @@ class RecommendationEngine:
                 filtered.append(imdb_id)
         return filtered
 
-    async def get_seed_items(self, media_type: Optional[str] = None) -> List[str]:
-        """
-        Get seed items for recommendations (loved items or watch history)
-        
-        Returns:
-            List of IMDB IDs to use as seeds
-        """
+    async def _get_library(self):
+        """Fetch and cache the user's Stremio library (single shared call)."""
         auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            return None, auth_key
+        self.config.stremio_auth_key = auth_key
+        cache_key = f"user:{auth_key}:library_raw"
+
+        async def build():
+            return await self.stremio.fetch_library(auth_key)
+
+        library = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_LIBRARY,
+            stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
+        )
+        return library, auth_key
+
+    async def get_seed_items(self, media_type: Optional[str] = None) -> List[str]:
+        """Get seed items for recommendations (loved items or watch history)."""
+        library, auth_key = await self._get_library()
         if not auth_key:
             logger.warning("No valid Stremio auth key available; skipping seed fetch")
             return []
-        self.config.stremio_auth_key = auth_key
         cache_key = f"user:{auth_key}:seeds:{media_type or 'all'}"
 
         async def build_seeds() -> List[str]:
@@ -118,17 +131,14 @@ class RecommendationEngine:
                     logger.info(f"Using {len(seeds)} loved items as seeds")
 
             # 2) Fallback to library watch history
-            library = await self.stremio.fetch_library(auth_key)
             logger.debug("  Library fetched")
             recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS * 2)
 
-            # Fallback: some libraries omit timestamps, so fall back to raw watched list
             if not recent:
                 recent = self.stremio.extract_watched_items(library)
 
             if media_type:
                 recent = await self._filter_imdb_ids_by_media_type(recent, media_type)
-            # Always append watched items to diversify seeds (even when loved exist)
             for imdb_id in recent:
                 if imdb_id not in seeds:
                     seeds.append(imdb_id)
@@ -148,25 +158,19 @@ class RecommendationEngine:
         if seeds:
             logger.debug(f"Seeds served via SWR: {len(seeds)} items")
         return seeds or []
-    
+
     async def get_watched_items(self) -> List[str]:
-        """
-        Get all watched items to filter out from recommendations
-        
-        Returns:
-            List of IMDB IDs that user has watched
-        """
-        auth_key = await self.stremio.resolve_auth_key(self.config)
+        """Get all watched items to filter out from recommendations."""
+        library, auth_key = await self._get_library()
         if not auth_key:
             logger.warning("No valid Stremio auth key available; skipping watched fetch")
             return []
-        self.config.stremio_auth_key = auth_key
         cache_key = f"user:{auth_key}:watched"
 
         async def build_watched() -> List[str]:
-            library = await self.stremio.fetch_library(auth_key)
             watched = self.stremio.extract_watched_items(library)
             return watched
+
         watched = await self.cache.stale_while_revalidate(
             key=cache_key,
             build_fn=build_watched,
@@ -273,15 +277,15 @@ class RecommendationEngine:
         # Batch fetch details for items without IMDB IDs
         if items_needing_enrichment:
             details_map = await self.tmdb.batch_details(items_needing_enrichment)
-            
+            to_cache: dict = {}
+
             for item in items_needing_enrichment:
                 tmdb_id = item.get("id")
                 media_type = item.get("media_type", "movie")
-                
+
                 if tmdb_id in details_map:
                     details = details_map[tmdb_id]
                     if details:
-                        # Merge missing fields
                         item.setdefault("external_ids", details.get("external_ids", {}))
                         if not item.get("poster_path"):
                             item["poster_path"] = details.get("poster_path")
@@ -293,17 +297,17 @@ class RecommendationEngine:
                             item["release_date"] = details.get("release_date")
                         if not item.get("first_air_date"):
                             item["first_air_date"] = details.get("first_air_date")
-                        # TMDB returns imdb_id at top level for movies, inside external_ids for TV shows
                         details_external_ids = details.get("external_ids", {})
                         item_imdb_id = item.get("imdb_id") or details.get("imdb_id") or details_external_ids.get("imdb_id")
                         if item_imdb_id:
                             item["imdb_id"] = item_imdb_id
-                
-                # Cache enriched item
-                cache_key = f"enriched:{tmdb_id}:{media_type}"
-                await self.cache.set(cache_key, item, ttl=settings.CACHE_TTL_RECOMMENDATIONS)
+
+                to_cache[f"enriched:{tmdb_id}:{media_type}"] = item
                 enriched_items.append(item)
-        
+
+            # Single pipeline round-trip instead of N sequential writes
+            await self.cache.mset(to_cache, ttl=settings.CACHE_TTL_RECOMMENDATIONS)
+
         return enriched_items
     
     def _apply_ratings(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -393,13 +397,17 @@ class RecommendationEngine:
         items: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Shared pipeline for curated catalogs: attach IDs, rate, score, rank."""
-        watched = await self.get_watched_items()
+        # Parallelize watched list, external IDs, and genre profile
+        watched_task = self.get_watched_items()
+        genre_task = self.get_user_genre_profile(media_type)
+
         try:
             items = await self._attach_external_ids(items)
         except Exception as ex:
             logger.warning(f"External ID attachment failed for curated catalog: {ex}")
+
         items = self._apply_ratings(items)
-        genre_ids = await self.get_user_genre_profile(media_type)
+        watched, genre_ids = await asyncio.gather(watched_task, genre_task)
         ranked = await self.score_and_rank(items, watched, set(genre_ids))
         return ranked
 
