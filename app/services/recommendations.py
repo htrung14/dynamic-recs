@@ -422,12 +422,13 @@ class RecommendationEngine:
         return await self._generate_curated(media_type, items)
 
     async def generate_new_releases(self, media_type: str) -> List[Dict[str, Any]]:
-        """Generate new release recommendations using user's genres (AND logic)."""
+        """Generate new release recommendations using user's keywords + genres."""
         tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
         genre_ids = await self.get_user_genre_profile(media_type)
+        keyword_ids = await self._get_user_keywords(media_type)
         if not genre_ids:
             return []
-        items = await self.tmdb.discover_new_releases(tmdb_type, genre_ids)
+        items = await self.tmdb.discover_new_releases(tmdb_type, genre_ids, keyword_ids)
         return await self._generate_curated(media_type, items)
 
     async def generate_genre_picks(self, media_type: str, genre_id: int) -> List[Dict[str, Any]]:
