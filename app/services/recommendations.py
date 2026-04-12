@@ -130,21 +130,44 @@ class RecommendationEngine:
                     seeds.extend(loved)
                     logger.info(f"Using {len(seeds)} loved items as seeds")
 
-            # 2) Fallback to library watch history
+            # 2) Library watch history — oversample, then rank by watch progress
             logger.debug("  Library fetched")
-            recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS * 2)
+            recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_SEEDS * 4)
 
             if not recent:
                 recent = self.stremio.extract_watched_items(library)
 
             if media_type:
                 recent = await self._filter_imdb_ids_by_media_type(recent, media_type)
-            for imdb_id in recent:
-                if imdb_id not in seeds:
-                    seeds.append(imdb_id)
-            seeds = seeds[: settings.MAX_SEEDS]
-            if recent:
-                logger.info(f"Using {len(seeds)} recently watched items as seeds (after merge)")
+
+            # Fetch watch progress in parallel to prioritize completed items
+            candidates = [r for r in recent if r not in seeds][:settings.MAX_SEEDS * 3]
+            if candidates and auth_key:
+                progress_tasks = [
+                    self.stremio.fetch_watched_progress(auth_key, imdb_id)
+                    for imdb_id in candidates
+                ]
+                progress_results = await asyncio.gather(*progress_tasks, return_exceptions=True)
+
+                # Sort by progress descending — fully watched items first
+                scored = []
+                for imdb_id, prog in zip(candidates, progress_results):
+                    p = prog if isinstance(prog, (int, float)) else 0.5  # default if fetch fails
+                    scored.append((imdb_id, p))
+                scored.sort(key=lambda x: x[1], reverse=True)
+
+                # Drop items barely started (< 20% progress)
+                for imdb_id, p in scored:
+                    if p >= 0.2 and imdb_id not in seeds:
+                        seeds.append(imdb_id)
+                    if len(seeds) >= settings.MAX_SEEDS:
+                        break
+                logger.info(f"Using {len(seeds)} progress-ranked items as seeds")
+            else:
+                for imdb_id in recent:
+                    if imdb_id not in seeds:
+                        seeds.append(imdb_id)
+                seeds = seeds[: settings.MAX_SEEDS]
 
             return seeds
 
