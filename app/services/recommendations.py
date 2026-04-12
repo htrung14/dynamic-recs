@@ -183,27 +183,31 @@ class RecommendationEngine:
         self,
         seeds: List[str]
     ) -> Tuple[List[Dict[str, Any]], Set[int]]:
-        """
-        Fetch recommendations from TMDB for seed items
-        
-        Args:
-            seeds: List of IMDB IDs to use as seeds
-            
+        """Fetch recommendations pooled across all seeds (used for combined ranking)."""
+        per_seed_rows, seed_genres = await self._fetch_per_seed(seeds)
+        combined: List[Dict[str, Any]] = []
+        for row in per_seed_rows:
+            combined.extend(row)
+        return combined, seed_genres
+
+    async def _fetch_per_seed(
+        self,
+        seeds: List[str]
+    ) -> Tuple[List[List[Dict[str, Any]]], Set[int]]:
+        """Fetch recommendations grouped per seed for distinct rows.
+
         Returns:
-            Tuple of (recommendation items, seed genre set)
+            Tuple of (list of per-seed item lists, seed genre set)
         """
-        # Convert IMDB IDs to TMDB IDs
         tmdb_items = []
         seed_genres: Set[int] = set()
 
-        # Resolve IMDB -> TMDB in parallel to minimize latency
         tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in seeds]
         resolved = await asyncio.gather(*tasks, return_exceptions=True)
         for tmdb_data in resolved:
             if isinstance(tmdb_data, dict):
                 tmdb_items.append(tmdb_data)
 
-        # Enrich seeds with genres to guide similarity scoring
         if tmdb_items:
             details_map = await self.tmdb.batch_details(tmdb_items)
             for item in tmdb_items:
@@ -215,29 +219,36 @@ class RecommendationEngine:
                     if genre_ids:
                         item["genre_ids"] = genre_ids
                 seed_genres.update(g for g in genre_ids if isinstance(g, int))
-        
+
         if not tmdb_items:
             return [], seed_genres
 
-        # Fetch recommendations and similars in parallel (avoid falling back to popular feed)
-        recs_task = self.tmdb.batch_recommendations(
-            tmdb_items,
-            max_per_item=settings.MAX_RECOMMENDATIONS_PER_SEED
-        )
-        similars_task = self.tmdb.batch_similar(
-            tmdb_items,
-            max_per_item=settings.MAX_RECOMMENDATIONS_PER_SEED
-        )
+        # Fetch recs + similar PER SEED in parallel
+        all_tasks = []
+        for item in tmdb_items:
+            tmdb_id = item.get("tmdb_id") or item.get("id")
+            media_type = item.get("media_type", "movie")
+            if tmdb_id:
+                all_tasks.append(self._recs_for_one_seed(tmdb_id, media_type))
 
-        recs, similars = await asyncio.gather(recs_task, similars_task)
+        per_seed_results = await asyncio.gather(*all_tasks, return_exceptions=True)
+        per_seed_rows: List[List[Dict[str, Any]]] = []
+        for result in per_seed_results:
+            if isinstance(result, list):
+                per_seed_rows.append(result)
+        return per_seed_rows, seed_genres
 
-        combined: List[Dict[str, Any]] = []
-        if recs:
-            combined.extend(recs)
-        if similars:
-            combined.extend(similars)
-
-        return combined, seed_genres
+    async def _recs_for_one_seed(self, tmdb_id: int, media_type: str) -> List[Dict[str, Any]]:
+        """Get recommendations + similar for a single seed, combined."""
+        recs_task = self.tmdb.get_recommendations(tmdb_id, media_type)
+        similar_task = self.tmdb.get_similar(tmdb_id, media_type)
+        recs, similar = await asyncio.gather(recs_task, similar_task, return_exceptions=True)
+        combined = []
+        if isinstance(recs, list):
+            combined.extend(recs[:settings.MAX_RECOMMENDATIONS_PER_SEED])
+        if isinstance(similar, list):
+            combined.extend(similar[:settings.MAX_RECOMMENDATIONS_PER_SEED])
+        return combined
 
     async def _attach_external_ids(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ensure each TMDB item has external_ids/imdb_id by fetching details when missing."""
