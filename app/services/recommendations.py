@@ -239,16 +239,11 @@ class RecommendationEngine:
         return per_seed_rows, seed_genres
 
     async def _recs_for_one_seed(self, tmdb_id: int, media_type: str) -> List[Dict[str, Any]]:
-        """Get recommendations + similar for a single seed, combined."""
-        recs_task = self.tmdb.get_recommendations(tmdb_id, media_type)
-        similar_task = self.tmdb.get_similar(tmdb_id, media_type)
-        recs, similar = await asyncio.gather(recs_task, similar_task, return_exceptions=True)
-        combined = []
+        """Get keyword-based niche recommendations for a single seed."""
+        recs = await self.tmdb.get_recommendations(tmdb_id, media_type)
         if isinstance(recs, list):
-            combined.extend(recs[:settings.MAX_RECOMMENDATIONS_PER_SEED])
-        if isinstance(similar, list):
-            combined.extend(similar[:settings.MAX_RECOMMENDATIONS_PER_SEED])
-        return combined
+            return recs[:settings.MAX_RECOMMENDATIONS_PER_SEED]
+        return []
 
     async def _attach_external_ids(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ensure each TMDB item has external_ids/imdb_id by fetching details when missing."""
