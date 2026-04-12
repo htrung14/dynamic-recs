@@ -3,6 +3,7 @@ Background Tasks
 Periodic cache warming and maintenance tasks
 """
 import asyncio
+import json
 import logging
 from typing import Set, Optional
 from datetime import datetime
@@ -13,23 +14,58 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+REDIS_CONFIGS_KEY = "background:registered_configs"
+
 
 class BackgroundTaskManager:
     """Manages background cache warming and maintenance tasks"""
-    
+
     def __init__(self):
         self.active_configs: Set[str] = set()
         self.config_cache: dict = {}  # Store full configs for background tasks
         self.task: Optional[asyncio.Task] = None
         self.running = False
-    
+
     def register_config(self, config: UserConfig, token: Optional[str] = None):
-        """Register a user config for background cache warming"""
+        """Register a user config for background cache warming and persist to Redis."""
         config_key = config.stremio_auth_key or config.stremio_username_enc or "unknown"
         if config_key not in self.active_configs:
             self.active_configs.add(config_key)
-            self.config_cache[config_key] = (config, token)  # Store tuple of (config, token)
+            self.config_cache[config_key] = (config, token)
             logger.info(f"Registered config for background warming: {config_key[:10]}...")
+            asyncio.create_task(self._persist_config(config_key, config, token))
+
+    async def _persist_config(self, config_key: str, config: UserConfig, token: Optional[str]):
+        """Save a single config entry to Redis so it survives restarts."""
+        try:
+            from app.services.cache import CacheManager
+            client = await CacheManager().get_client()
+            entry = json.dumps({"config": config.model_dump(), "token": token})
+            await client.hset(REDIS_CONFIGS_KEY, config_key, entry)
+        except Exception as e:
+            logger.warning(f"Failed to persist config to Redis: {e}")
+
+    async def restore_configs(self):
+        """Reload previously registered configs from Redis."""
+        try:
+            from app.services.cache import CacheManager
+            client = await CacheManager().get_client()
+            entries = await client.hgetall(REDIS_CONFIGS_KEY)
+            for config_key, raw in entries.items():
+                if config_key in self.active_configs:
+                    continue
+                try:
+                    data = json.loads(raw)
+                    config = UserConfig(**data["config"])
+                    token = data.get("token")
+                    self.active_configs.add(config_key)
+                    self.config_cache[config_key] = (config, token)
+                except Exception as e:
+                    logger.warning(f"Skipping invalid persisted config {config_key[:10]}...: {e}")
+            if entries:
+                logger.info(f"Restored {len(self.active_configs)} configs from Redis")
+        except Exception as e:
+            logger.warning(f"Failed to restore configs from Redis: {e}")
     
     async def warm_cache_for_config(self, config: UserConfig, token: Optional[str] = None):
         """

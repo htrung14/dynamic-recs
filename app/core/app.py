@@ -36,8 +36,9 @@ async def lifespan(app: FastAPI):
             "The Configure button may not work properly. Please set BASE_URL to an HTTPS endpoint."
         )
     
-    # Start background cache warming
+    # Restore registered configs from Redis and start background cache warming
     task_manager = get_task_manager()
+    await task_manager.restore_configs()
     task_manager.start(interval_hours=settings.CACHE_WARM_INTERVAL_HOURS)
     logger.info(f"Background cache warming enabled (interval: {settings.CACHE_WARM_INTERVAL_HOURS}h)")
     
