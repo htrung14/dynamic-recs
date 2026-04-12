@@ -319,6 +319,10 @@ class RecommendationEngine:
     async def _build_taste_profile(self, media_type: Optional[str] = None) -> Dict[str, Any]:
         """Build a deep taste profile from a large sample of watch history.
 
+        The profile is built from ALL watch history (media_type agnostic) and
+        cached once. The media_type parameter is accepted for API compat but
+        ignored — a unified profile avoids rebuilding 75 TMDB calls per type.
+
         Returns dict with:
             genre_weights: {genre_id: 0.0-1.0} normalised weight vector
             top_genres: [genre_id, ...] top 5 by weight
@@ -327,7 +331,7 @@ class RecommendationEngine:
         library, auth_key = await self._get_library()
         if not auth_key or not library:
             return {"genre_weights": {}, "top_genres": [], "top_keywords": []}
-        cache_key = f"user:{auth_key}:taste:v2:{media_type or 'all'}"
+        cache_key = f"user:{auth_key}:taste:v3"
 
         async def build() -> Dict[str, Any]:
             # Sample up to MAX_TASTE_SAMPLE recent watches for the profile
