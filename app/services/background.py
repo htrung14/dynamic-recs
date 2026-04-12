@@ -64,6 +64,8 @@ class BackgroundTaskManager:
                     logger.warning(f"Skipping invalid persisted config {config_key[:10]}...: {e}")
             if entries:
                 logger.info(f"Restored {len(self.active_configs)} configs from Redis")
+            else:
+                logger.info("No persisted configs found in Redis (first run or empty)")
         except Exception as e:
             logger.warning(f"Failed to restore configs from Redis: {e}")
     

@@ -89,41 +89,55 @@ async def get_catalog(
         raise HTTPException(status_code=400, detail="Invalid catalog type")
     
     # Validate catalog ID format
-    if not id.startswith("dynamic_"):
+    valid_prefixes = ("dynamic_", "gems_", "new_", "genre_")
+    if not any(id.startswith(p) for p in valid_prefixes):
         raise HTTPException(status_code=404, detail="Catalog not found")
-    
+
     engine: RecommendationEngine = None  # type: ignore
 
     try:
         # Register config for background cache warming
         task_manager = get_task_manager()
         task_manager.register_config(config, token=token)
-        
-        # Initialize recommendation engine (pass token for per-user rate limiting)
+
+        # Initialize recommendation engine
         engine = RecommendationEngine(config, token=token)
-        
-        # Generate recommendations
-        recommendations = await engine.generate_recommendations(media_type=type)
-        
+
+        # Route to the right generation method based on catalog ID
+        if id.startswith("gems_"):
+            recommendations = await engine.generate_hidden_gems(media_type=type)
+        elif id.startswith("new_"):
+            recommendations = await engine.generate_new_releases(media_type=type)
+        elif id.startswith("genre_"):
+            # genre_{id}_movie or genre_{id}_series
+            parts = id.split("_")
+            genre_id = int(parts[1])
+            recommendations = await engine.generate_genre_picks(media_type=type, genre_id=genre_id)
+        else:
+            # Existing dynamic_movie_N / dynamic_series_N
+            recommendations = await engine.generate_recommendations(media_type=type)
+
         # Schedule background cache warming for this config (non-blocking)
         asyncio.create_task(task_manager.warm_cache_for_config(config))
-        
+
         # Convert to MetaPoster objects
-        metas = []
         items_per_row = 20  # Standard Stremio row size
-        
-        # Extract row index from catalog ID
-        try:
-            row_index = int(id.split("_")[-1])
-            start_idx = row_index * items_per_row
-            end_idx = start_idx + items_per_row
-            
-            row_items = recommendations[start_idx:end_idx]
-        except (ValueError, IndexError):
+
+        # For dynamic_ catalogs, extract row slice by index
+        if id.startswith("dynamic_"):
+            try:
+                row_index = int(id.split("_")[-1])
+                start_idx = row_index * items_per_row
+                end_idx = start_idx + items_per_row
+                row_items = recommendations[start_idx:end_idx]
+            except (ValueError, IndexError):
+                row_items = recommendations[:items_per_row]
+        else:
+            # Curated catalogs: return first N items
             row_items = recommendations[:items_per_row]
-        
+
+        metas = []
         for item in row_items:
-            # Skip items without valid IMDB ID before conversion
             external_ids = item.get("external_ids", {})
             imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
             if not imdb_id:
@@ -144,12 +158,12 @@ async def get_catalog(
                     item.get("id"),
                     exc_info=True
                 )
-        
+
         logger.info(f"Catalog {id} returned {len(metas)} items")
-        
+
         catalog_response = CatalogResponse(metas=metas)
         return catalog_response.model_dump()
-        
+
     except Exception as e:
         logger.error(f"Error generating catalog: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate recommendations")

@@ -4,6 +4,8 @@ Core recommendation logic combining multiple data sources
 """
 import asyncio
 import logging
+from collections import Counter
+from datetime import datetime
 from typing import List, Dict, Optional, Any, Set, Tuple
 from app.services.tmdb import TMDBClient
 from app.services.stremio import StremioClient
@@ -309,6 +311,81 @@ class RecommendationEngine:
         for item in items:
             item["merged_rating"] = item.get("vote_average", 0.0)
         return items
+
+    async def get_user_genre_profile(self, media_type: Optional[str] = None) -> List[int]:
+        """Return the user's top genre IDs ranked by frequency across seed items."""
+        auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            return []
+        self.config.stremio_auth_key = auth_key
+        cache_key = f"user:{auth_key}:genres:{media_type or 'all'}"
+
+        async def build() -> List[int]:
+            seeds = await self.get_seed_items(media_type)
+            if not seeds:
+                return []
+            tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in seeds]
+            resolved = await asyncio.gather(*tasks, return_exceptions=True)
+            tmdb_items = [r for r in resolved if isinstance(r, dict)]
+            if not tmdb_items:
+                return []
+            details_map = await self.tmdb.batch_details(tmdb_items)
+            genre_counter: Counter = Counter()
+            for item in tmdb_items:
+                genre_ids = item.get("genre_ids", [])
+                details = details_map.get(item.get("id"))
+                if not genre_ids and details:
+                    genre_ids = [g.get("id") for g in details.get("genres", []) if g.get("id")]
+                genre_counter.update(g for g in genre_ids if isinstance(g, int))
+            return [gid for gid, _ in genre_counter.most_common(5)]
+
+        result = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_LIBRARY,
+            stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
+        )
+        return result or []
+
+    async def _generate_curated(
+        self,
+        media_type: str,
+        items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Shared pipeline for curated catalogs: attach IDs, rate, score, rank."""
+        watched = await self.get_watched_items()
+        try:
+            items = await self._attach_external_ids(items)
+        except Exception as ex:
+            logger.warning(f"External ID attachment failed for curated catalog: {ex}")
+        items = self._apply_ratings(items)
+        genre_ids = await self.get_user_genre_profile(media_type)
+        ranked = await self.score_and_rank(items, watched, set(genre_ids))
+        return ranked
+
+    async def generate_hidden_gems(self, media_type: str) -> List[Dict[str, Any]]:
+        """Generate hidden gem recommendations personalized to user's genres."""
+        tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
+        genre_ids = await self.get_user_genre_profile(media_type)
+        if not genre_ids:
+            return []
+        items = await self.tmdb.discover_hidden_gems(tmdb_type, genre_ids)
+        return await self._generate_curated(media_type, items)
+
+    async def generate_new_releases(self, media_type: str) -> List[Dict[str, Any]]:
+        """Generate new release recommendations personalized to user's genres."""
+        tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
+        genre_ids = await self.get_user_genre_profile(media_type)
+        if not genre_ids:
+            return []
+        items = await self.tmdb.discover_new_releases(tmdb_type, genre_ids)
+        return await self._generate_curated(media_type, items)
+
+    async def generate_genre_picks(self, media_type: str, genre_id: int) -> List[Dict[str, Any]]:
+        """Generate top picks for a specific genre."""
+        tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
+        items = await self.tmdb.discover_genre_picks(tmdb_type, genre_id)
+        return await self._generate_curated(media_type, items)
     
     async def score_and_rank(
         self,
@@ -352,12 +429,12 @@ class RecommendationEngine:
         # Score each item
         scored = []
         seed_genres = seed_genres or set()
+        now_year = datetime.now().year
         for item in filtered:
             item_id = str(item["id"])
-            
+
             freq_score = freq_scores.get(item_id, 0.0)
             rating_score = item.get("merged_rating", 0.0) / 10.0
-            popularity_score = min(item.get("popularity", 0.0) / 100.0, 1.0)
 
             # Genre similarity against seed set
             genre_ids = item.get("genre_ids") or []
@@ -366,13 +443,29 @@ class RecommendationEngine:
             overlap = 0.0
             if genre_ids and seed_genres:
                 overlap = len(set([g for g in genre_ids if g]) & seed_genres) / float(len(genre_ids))
-            
+
+            # Recency bonus: items from last 2 years get a small boost
+            release_str = item.get("release_date") or item.get("first_air_date") or ""
+            recency = 0.0
+            if release_str:
+                try:
+                    release_year = int(release_str[:4])
+                    if now_year - release_year <= 2:
+                        recency = 1.0
+                except (ValueError, IndexError):
+                    pass
+
+            # Mainstream penalty: very popular items get slightly penalized
+            raw_pop = item.get("popularity", 0.0)
+            mainstream_penalty = min(raw_pop / 500.0, 1.0) if raw_pop > 100 else 0.0
+
             # Combined score
             final_score = (
                 0.45 * freq_score +
-                0.35 * rating_score +
-                0.1 * popularity_score +
-                0.1 * overlap
+                0.30 * rating_score +
+                0.15 * overlap +
+                0.05 * recency
+                - 0.05 * mainstream_penalty
             )
             
             item["score"] = final_score

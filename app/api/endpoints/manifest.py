@@ -16,6 +16,16 @@ from app.services.recommendations import RecommendationEngine
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# TMDB genre IDs are stable — map for display names
+TMDB_GENRE_NAMES: dict = {
+    28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+    99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+    27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Sci-Fi",
+    10770: "TV Movie", 53: "Thriller", 10752: "War", 37: "Western",
+    10759: "Action & Adventure", 10762: "Kids", 10763: "News", 10764: "Reality",
+    10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk", 10768: "War & Politics",
+}
+
 
 @router.get("/{token}/manifest.json")
 async def get_manifest(
@@ -65,7 +75,36 @@ async def get_manifest(
     
     # Build catalogs based on user configuration
     catalogs = []
-    
+
+    # --- Curated catalogs (appear first in Stremio) ---
+    # Get user's top genres for personalized curated rows
+    engine = RecommendationEngine(config, token=token)
+    try:
+        user_genres = await engine.get_user_genre_profile()
+    except Exception as e:
+        logger.warning(f"Failed to get user genre profile: {e}")
+        user_genres = []
+    finally:
+        await engine.close()
+
+    top_3_genres = user_genres[:3]
+
+    if config.include_movies:
+        catalogs.append(ManifestCatalog(type="movie", id="gems_movie", name="💎 Hidden Gems"))
+        catalogs.append(ManifestCatalog(type="movie", id="new_movie", name="🆕 New Releases For You"))
+        for gid in top_3_genres:
+            gname = TMDB_GENRE_NAMES.get(gid, f"Genre {gid}")
+            catalogs.append(ManifestCatalog(type="movie", id=f"genre_{gid}_movie", name=f"🎯 {gname} For You"))
+
+    if config.include_series:
+        catalogs.append(ManifestCatalog(type="series", id="gems_series", name="💎 Hidden Gems"))
+        catalogs.append(ManifestCatalog(type="series", id="new_series", name="🆕 New Releases For You"))
+        for gid in top_3_genres:
+            gname = TMDB_GENRE_NAMES.get(gid, f"Genre {gid}")
+            catalogs.append(ManifestCatalog(type="series", id=f"genre_{gid}_series", name=f"🎯 {gname} For You"))
+
+    # --- Personalized "Because you watched" catalogs ---
+
     # Add movie catalogs if enabled
     if config.include_movies:
         # Prefer loved seeds first, then fall back to recent watches

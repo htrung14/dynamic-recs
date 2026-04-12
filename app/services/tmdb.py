@@ -309,6 +309,113 @@ class TMDBClient:
             stale_ttl=settings.CACHE_TTL_RECOMMENDATIONS * 3,
         )
     
+    async def discover_hidden_gems(
+        self,
+        media_type: str,
+        genre_ids: List[int],
+        page: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """High-rated, low-popularity items matching user's genre profile."""
+        sorted_ids = sorted(genre_ids)
+        cache_key = f"discover:gems:{media_type}:{'_'.join(map(str, sorted_ids))}:page{page}"
+
+        async def build() -> List[Dict[str, Any]]:
+            endpoint = f"/discover/{media_type}"
+            params = {
+                "page": page,
+                "with_genres": "|".join(map(str, genre_ids)),
+                "vote_average.gte": 7.0,
+                "vote_count.gte": 50,
+                "vote_count.lte": 1000,
+                "sort_by": "vote_average.desc",
+            }
+            response = await self._request(endpoint, params)
+            if response and "results" in response:
+                for item in response["results"]:
+                    item.setdefault("media_type", media_type)
+                return response["results"]
+            return []
+
+        return await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_CATALOG,
+            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
+        )
+
+    async def discover_new_releases(
+        self,
+        media_type: str,
+        genre_ids: List[int],
+        page: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """Recently released items matching user's genre profile."""
+        from datetime import datetime, timedelta
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        ago_90 = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+        sorted_ids = sorted(genre_ids)
+        cache_key = f"discover:new:{media_type}:{'_'.join(map(str, sorted_ids))}:page{page}"
+
+        date_gte_key = "primary_release_date.gte" if media_type == "movie" else "first_air_date.gte"
+        date_lte_key = "primary_release_date.lte" if media_type == "movie" else "first_air_date.lte"
+
+        async def build() -> List[Dict[str, Any]]:
+            endpoint = f"/discover/{media_type}"
+            params = {
+                "page": page,
+                "with_genres": "|".join(map(str, genre_ids)),
+                date_gte_key: ago_90,
+                date_lte_key: today,
+                "vote_count.gte": 10,
+                "sort_by": "popularity.desc",
+            }
+            response = await self._request(endpoint, params)
+            if response and "results" in response:
+                for item in response["results"]:
+                    item.setdefault("media_type", media_type)
+                return response["results"]
+            return []
+
+        return await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_CATALOG,
+            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
+        )
+
+    async def discover_genre_picks(
+        self,
+        media_type: str,
+        genre_id: int,
+        page: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """Top-rated items for a specific genre."""
+        cache_key = f"discover:genre:{media_type}:{genre_id}:page{page}"
+
+        async def build() -> List[Dict[str, Any]]:
+            endpoint = f"/discover/{media_type}"
+            params = {
+                "page": page,
+                "with_genres": str(genre_id),
+                "vote_average.gte": 6.5,
+                "vote_count.gte": 100,
+                "sort_by": "vote_average.desc",
+            }
+            response = await self._request(endpoint, params)
+            if response and "results" in response:
+                for item in response["results"]:
+                    item.setdefault("media_type", media_type)
+                return response["results"]
+            return []
+
+        return await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_CATALOG,
+            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
+        )
+
     async def find_by_imdb_id(self, imdb_id: str) -> Optional[Dict[str, Any]]:
         """
         Find TMDB entry by IMDB ID
