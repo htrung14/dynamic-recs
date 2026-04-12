@@ -347,6 +347,46 @@ class RecommendationEngine:
         )
         return result or []
 
+    async def _get_user_keywords(self, media_type: Optional[str] = None) -> List[int]:
+        """Extract top keyword IDs from the user's seed items for targeted discovery."""
+        auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            return []
+        self.config.stremio_auth_key = auth_key
+        cache_key = f"user:{auth_key}:keywords:{media_type or 'all'}"
+
+        async def build() -> List[int]:
+            seeds = await self.get_seed_items(media_type)
+            if not seeds:
+                return []
+            tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in seeds]
+            resolved = await asyncio.gather(*tasks, return_exceptions=True)
+            tmdb_items = [r for r in resolved if isinstance(r, dict)]
+            if not tmdb_items:
+                return []
+            # Fetch keywords for each seed in parallel
+            kw_tasks = [
+                self.tmdb.get_keywords(item["id"], item.get("media_type", "movie"))
+                for item in tmdb_items if item.get("id")
+            ]
+            kw_results = await asyncio.gather(*kw_tasks, return_exceptions=True)
+            kw_counter: Counter = Counter()
+            for result in kw_results:
+                if isinstance(result, list):
+                    for kw in result:
+                        kw_id = kw.get("id")
+                        if kw_id:
+                            kw_counter[kw_id] += 1
+            return [kid for kid, _ in kw_counter.most_common(10)]
+
+        result = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_LIBRARY,
+            stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
+        )
+        return result or []
+
     async def _generate_curated(
         self,
         media_type: str,
@@ -364,16 +404,17 @@ class RecommendationEngine:
         return ranked
 
     async def generate_hidden_gems(self, media_type: str) -> List[Dict[str, Any]]:
-        """Generate hidden gem recommendations personalized to user's genres."""
+        """Generate hidden gem recommendations using user's keywords + genres."""
         tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
         genre_ids = await self.get_user_genre_profile(media_type)
+        keyword_ids = await self._get_user_keywords(media_type)
         if not genre_ids:
             return []
-        items = await self.tmdb.discover_hidden_gems(tmdb_type, genre_ids)
+        items = await self.tmdb.discover_hidden_gems(tmdb_type, genre_ids, keyword_ids)
         return await self._generate_curated(media_type, items)
 
     async def generate_new_releases(self, media_type: str) -> List[Dict[str, Any]]:
-        """Generate new release recommendations personalized to user's genres."""
+        """Generate new release recommendations using user's genres (AND logic)."""
         tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
         genre_ids = await self.get_user_genre_profile(media_type)
         if not genre_ids:
@@ -382,9 +423,10 @@ class RecommendationEngine:
         return await self._generate_curated(media_type, items)
 
     async def generate_genre_picks(self, media_type: str, genre_id: int) -> List[Dict[str, Any]]:
-        """Generate top picks for a specific genre."""
+        """Generate picks for a specific genre, narrowed by user's keywords."""
         tmdb_type = {"movie": "movie", "series": "tv"}.get(media_type, media_type)
-        items = await self.tmdb.discover_genre_picks(tmdb_type, genre_id)
+        keyword_ids = await self._get_user_keywords(media_type)
+        items = await self.tmdb.discover_genre_picks(tmdb_type, genre_id, keyword_ids)
         return await self._generate_curated(media_type, items)
     
     async def score_and_rank(
