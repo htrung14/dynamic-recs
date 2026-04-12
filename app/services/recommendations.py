@@ -316,62 +316,61 @@ class RecommendationEngine:
             item["merged_rating"] = item.get("vote_average", 0.0)
         return items
 
-    async def get_user_genre_profile(self, media_type: Optional[str] = None) -> List[int]:
-        """Return the user's top genre IDs ranked by frequency across seed items."""
-        auth_key = await self.stremio.resolve_auth_key(self.config)
-        if not auth_key:
-            return []
-        self.config.stremio_auth_key = auth_key
-        cache_key = f"user:{auth_key}:genres:{media_type or 'all'}"
+    async def _build_taste_profile(self, media_type: Optional[str] = None) -> Dict[str, Any]:
+        """Build a deep taste profile from a large sample of watch history.
 
-        async def build() -> List[int]:
-            seeds = await self.get_seed_items(media_type)
-            if not seeds:
-                return []
-            tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in seeds]
+        Returns dict with:
+            genre_weights: {genre_id: 0.0-1.0} normalised weight vector
+            top_genres: [genre_id, ...] top 5 by weight
+            top_keywords: [keyword_id, ...] top 15 by frequency
+        """
+        library, auth_key = await self._get_library()
+        if not auth_key or not library:
+            return {"genre_weights": {}, "top_genres": [], "top_keywords": []}
+        cache_key = f"user:{auth_key}:taste:v2:{media_type or 'all'}"
+
+        async def build() -> Dict[str, Any]:
+            # Sample up to MAX_TASTE_SAMPLE recent watches for the profile
+            recent = self.stremio.extract_recently_watched(library, limit=settings.MAX_TASTE_SAMPLE)
+            if not recent:
+                recent = self.stremio.extract_watched_items(library)[:settings.MAX_TASTE_SAMPLE]
+            if not recent:
+                return {"genre_weights": {}, "top_genres": [], "top_keywords": []}
+
+            # Resolve to TMDB in parallel
+            tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in recent]
             resolved = await asyncio.gather(*tasks, return_exceptions=True)
             tmdb_items = [r for r in resolved if isinstance(r, dict)]
             if not tmdb_items:
-                return []
+                return {"genre_weights": {}, "top_genres": [], "top_keywords": []}
+
+            # Batch details for genre enrichment
             details_map = await self.tmdb.batch_details(tmdb_items)
+
+            # Build genre frequency counter with recency weighting
+            # Most recent item gets weight 1.0, oldest gets 0.3
             genre_counter: Counter = Counter()
-            for item in tmdb_items:
+            n = len(tmdb_items)
+            for idx, item in enumerate(tmdb_items):
+                recency_weight = 0.3 + 0.7 * ((n - idx) / n)
                 genre_ids = item.get("genre_ids", [])
                 details = details_map.get(item.get("id"))
                 if not genre_ids and details:
                     genre_ids = [g.get("id") for g in details.get("genres", []) if g.get("id")]
-                genre_counter.update(g for g in genre_ids if isinstance(g, int))
-            return [gid for gid, _ in genre_counter.most_common(5)]
+                for gid in genre_ids:
+                    if isinstance(gid, int):
+                        genre_counter[gid] += recency_weight
 
-        result = await self.cache.stale_while_revalidate(
-            key=cache_key,
-            build_fn=build,
-            ttl=settings.CACHE_TTL_LIBRARY,
-            stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
-        )
-        return result or []
+            # Normalise to 0-1 weight vector
+            max_weight = max(genre_counter.values()) if genre_counter else 1.0
+            genre_weights = {gid: w / max_weight for gid, w in genre_counter.items()}
+            top_genres = [gid for gid, _ in genre_counter.most_common(5)]
 
-    async def _get_user_keywords(self, media_type: Optional[str] = None) -> List[int]:
-        """Extract top keyword IDs from the user's seed items for targeted discovery."""
-        auth_key = await self.stremio.resolve_auth_key(self.config)
-        if not auth_key:
-            return []
-        self.config.stremio_auth_key = auth_key
-        cache_key = f"user:{auth_key}:keywords:{media_type or 'all'}"
-
-        async def build() -> List[int]:
-            seeds = await self.get_seed_items(media_type)
-            if not seeds:
-                return []
-            tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in seeds]
-            resolved = await asyncio.gather(*tasks, return_exceptions=True)
-            tmdb_items = [r for r in resolved if isinstance(r, dict)]
-            if not tmdb_items:
-                return []
-            # Fetch keywords for each seed in parallel
+            # Fetch keywords for top 15 items (most recent) in parallel
+            kw_sample = tmdb_items[:15]
             kw_tasks = [
                 self.tmdb.get_keywords(item["id"], item.get("media_type", "movie"))
-                for item in tmdb_items if item.get("id")
+                for item in kw_sample if item.get("id")
             ]
             kw_results = await asyncio.gather(*kw_tasks, return_exceptions=True)
             kw_counter: Counter = Counter()
@@ -381,7 +380,13 @@ class RecommendationEngine:
                         kw_id = kw.get("id")
                         if kw_id:
                             kw_counter[kw_id] += 1
-            return [kid for kid, _ in kw_counter.most_common(10)]
+            top_keywords = [kid for kid, _ in kw_counter.most_common(15)]
+
+            return {
+                "genre_weights": genre_weights,
+                "top_genres": top_genres,
+                "top_keywords": top_keywords,
+            }
 
         result = await self.cache.stale_while_revalidate(
             key=cache_key,
@@ -389,7 +394,17 @@ class RecommendationEngine:
             ttl=settings.CACHE_TTL_LIBRARY,
             stale_ttl=settings.CACHE_TTL_LIBRARY * 3,
         )
-        return result or []
+        return result or {"genre_weights": {}, "top_genres": [], "top_keywords": []}
+
+    async def get_user_genre_profile(self, media_type: Optional[str] = None) -> List[int]:
+        """Return top genre IDs from the deep taste profile."""
+        profile = await self._build_taste_profile(media_type)
+        return profile.get("top_genres", [])
+
+    async def _get_user_keywords(self, media_type: Optional[str] = None) -> List[int]:
+        """Return top keyword IDs from the deep taste profile."""
+        profile = await self._build_taste_profile(media_type)
+        return profile.get("top_keywords", [])
 
     async def _generate_curated(
         self,
@@ -397,9 +412,8 @@ class RecommendationEngine:
         items: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Shared pipeline for curated catalogs: attach IDs, rate, score, rank."""
-        # Parallelize watched list, external IDs, and genre profile
+        # Parallelize watched list and external IDs
         watched_task = self.get_watched_items()
-        genre_task = self.get_user_genre_profile(media_type)
 
         try:
             items = await self._attach_external_ids(items)
@@ -407,8 +421,9 @@ class RecommendationEngine:
             logger.warning(f"External ID attachment failed for curated catalog: {ex}")
 
         items = self._apply_ratings(items)
-        watched, genre_ids = await asyncio.gather(watched_task, genre_task)
-        ranked = await self.score_and_rank(items, watched, set(genre_ids))
+        watched = await watched_task
+        # score_and_rank loads taste profile internally
+        ranked = await self.score_and_rank(items, watched)
         return ranked
 
     async def generate_hidden_gems(self, media_type: str) -> List[Dict[str, Any]]:
@@ -444,25 +459,17 @@ class RecommendationEngine:
         watched: List[str],
         seed_genres: Optional[Set[int]] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Score and rank recommendations
-        
-        Args:
-            items: List of recommendation items
-            watched: List of watched IMDB IDs to filter out
-            
-        Returns:
-            Scored and ranked items
-        """
-        # Frequency scores must be computed before dedup so counts reflect
-        # how many seeds recommended each item (not always 1 after dedup).
+        """Score and rank using deep taste profile (genre weight vector)."""
+        # Frequency scores must be computed before dedup
         item_ids = [str(item["id"]) for item in items]
         freq_scores = score_by_frequency(item_ids)
 
-        # Deduplicate by TMDB ID
         items = deduplicate_recommendations(items, key="id")
 
-        # Filter out watched items and anime (if configured)
+        # Load deep taste profile for weighted genre scoring
+        profile = await self._build_taste_profile()
+        genre_weights = profile.get("genre_weights", {})
+
         watched_set = set(watched)
         filtered = []
 
@@ -471,15 +478,12 @@ class RecommendationEngine:
             imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
 
             if imdb_id not in watched_set:
-                # Filter anime if enabled
                 if self.config.exclude_anime and self._is_anime(item):
                     logger.debug(f"Filtering anime: {item.get('name') or item.get('title')}")
                     continue
                 filtered.append(item)
-        
-        # Score each item
+
         scored = []
-        seed_genres = seed_genres or set()
         now_year = datetime.now().year
         for item in filtered:
             item_id = str(item["id"])
@@ -487,15 +491,17 @@ class RecommendationEngine:
             freq_score = freq_scores.get(item_id, 0.0)
             rating_score = item.get("merged_rating", 0.0) / 10.0
 
-            # Genre similarity against seed set
+            # Taste affinity: weighted genre match against full watch history
+            # Instead of binary overlap, sum the user's weight for each matching genre
             genre_ids = item.get("genre_ids") or []
             if not genre_ids and item.get("genres"):
                 genre_ids = [g.get("id") for g in item.get("genres", []) if g.get("id")]
-            overlap = 0.0
-            if genre_ids and seed_genres:
-                overlap = len(set([g for g in genre_ids if g]) & seed_genres) / float(len(genre_ids))
+            taste_affinity = 0.0
+            if genre_ids and genre_weights:
+                matching_weight = sum(genre_weights.get(g, 0.0) for g in genre_ids if g)
+                taste_affinity = matching_weight / len(genre_ids)
 
-            # Recency bonus: items from last 2 years get a small boost
+            # Recency bonus
             release_str = item.get("release_date") or item.get("first_air_date") or ""
             recency = 0.0
             if release_str:
@@ -506,28 +512,24 @@ class RecommendationEngine:
                 except (ValueError, IndexError):
                     pass
 
-            # Mainstream penalty: very popular items get slightly penalized
+            # Mainstream penalty
             raw_pop = item.get("popularity", 0.0)
             mainstream_penalty = min(raw_pop / 500.0, 1.0) if raw_pop > 100 else 0.0
 
-            # Combined score
             final_score = (
-                0.45 * freq_score +
-                0.30 * rating_score +
-                0.15 * overlap +
+                0.35 * freq_score +
+                0.25 * rating_score +
+                0.25 * taste_affinity +
                 0.05 * recency
-                - 0.05 * mainstream_penalty
+                - 0.10 * mainstream_penalty
             )
-            
+
             item["score"] = final_score
-            
-            # Filter by minimum rating
+
             if item.get("merged_rating", 0.0) >= self.config.min_rating:
                 scored.append(item)
-        
-        # Sort by score
+
         scored.sort(key=lambda x: x["score"], reverse=True)
-        
         return scored
     
     async def generate_recommendations(
