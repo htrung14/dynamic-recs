@@ -241,16 +241,40 @@ class StremioClient:
         
         return [imdb_id for imdb_id, _ in watched_with_time[:limit]]
     
+    @staticmethod
+    def _progress_from_state(state: dict) -> Optional[float]:
+        """Derive watch progress from a Stremio libraryItem ``state`` dict.
+
+        Returns:
+            - A ratio 0.0–1.0 when ``timeOffset`` / ``duration`` are available.
+            - ``1.0`` when the item has been watched at least once (flagged,
+              ``timesWatched > 0``, or ``lastWatched`` is set).
+            - ``None`` when no usable signal exists.
+        """
+        duration = state.get("duration") or 0
+        time_offset = state.get("timeOffset") or 0
+        if duration > 0 and time_offset > 0:
+            return min(time_offset / duration, 1.0)
+
+        if (
+            state.get("flaggedWatched")
+            or (state.get("timesWatched") or 0) > 0
+            or state.get("lastWatched")
+        ):
+            return 1.0
+
+        return None
+
     async def fetch_watched_progress(self, auth_key: str, imdb_id: str) -> Optional[float]:
         """
         Fetch watch progress for a single item (0-1 scale, 0.5 = 50%)
-        
+
         Args:
             auth_key: Stremio authentication key
             imdb_id: IMDB ID (e.g., tt1234567)
-            
+
         Returns:
-            Progress as float 0.0-1.0, or None on error
+            Progress as float 0.0-1.0, or None when genuinely unknown
         """
         cache_key = f"progress:{auth_key}:{imdb_id}"
         
@@ -274,9 +298,9 @@ class StremioClient:
 
                     # Some responses return a list of entries instead of a dict
                     if isinstance(result, list):
-                        # Pick the first dict entry that has "watched"
+                        # Pick the first dict entry that has a "state" key
                         for entry in result:
-                            if isinstance(entry, dict) and "watched" in entry:
+                            if isinstance(entry, dict) and "state" in entry:
                                 result = entry
                                 break
                         else:
@@ -284,15 +308,12 @@ class StremioClient:
                     elif not isinstance(result, dict):
                         result = {}
 
-                    # Extract progress (0.0-1.0)
-                    progress = result.get("watched", 0.0)
-                    if isinstance(progress, (int, float)):
-                        progress = float(progress)
-                    else:
-                        progress = 0.0
+                    state = result.get("state", {}) if isinstance(result, dict) else {}
+                    progress = self._progress_from_state(state)
                     
-                    # Cache for 1 hour
-                    await self.cache.set(cache_key, progress, ttl=3600)
+                    # Cache only when we have a concrete value
+                    if progress is not None:
+                        await self.cache.set(cache_key, progress, ttl=3600)
                     return progress
                 else:
                     logger.debug(f"Stremio progress fetch returned {response.status}")

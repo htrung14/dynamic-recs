@@ -101,10 +101,32 @@ HTML-escape the **string** placeholder substitutions in configure.py
 (`__TMDB_DEFAULT__`, `__STREMIO_AUTH_DEFAULT__`, `__STREMIO_LOVED_DEFAULT__`).
 Numeric/`checked` placeholders are not injectable.
 
-## Deferred (Phase 4-5, separate session)
+## Phase 4 — BUG-C true per-seed rows (user chose this fix)
 
-- BUG-C "Because you watched X" rows are offset-slices of one pooled list →
-  serve true per-seed rows (user chose this fix).
+Root cause: two divergent seed derivations. manifest.py titles row i from its
+own `loved + recent_watches` list; catalog.py fills row i from
+`generate_recommendations` (pools ALL seeds, global rank) sliced
+`[i*20:(i+1)*20]`. Titles never match content.
+
+Fix — unify on the single canonical ordered seed list (`get_seed_items`,
+already SWR-cached, loved-first then progress-ranked):
+- recommendations.py: add `generate_recommendations_for_seed(media_type,
+  seed_index)`. Resolves `get_seed_items(media_type)[seed_index]`, generates
+  recs from that one seed (`_recs_for_one_seed`), enriches/rates/score_and_rank
+  with watched, returns ranked. Cache per
+  `user:{auth}:recs_seed:{media_type}:{seed_imdb}:{cache_fingerprint}` via SWR.
+  Out-of-range index → [].
+- catalog.py: `dynamic_{type}_{i}` calls the new method, returns first 20 (no
+  global slice).
+- manifest.py: title rows from `get_seed_items(media_type)` order; keep the
+  loved-vs-watched label by membership test against the loved list it already
+  fetches. Same cached seed list → titles and content align.
+
+Note: the manifest `_warm_and_cache_catalogs` writer (`catalog:{token}:...`) is
+never read anywhere; left as-is (latent dead path), not expanded.
+
+## Deferred (Phase 5, check in first)
+
 - BUG-B watch-progress parse (needs live-Stremio verification).
 - God-class decomposition, central `cache_keys.py`, config immutability.
 - Latent: manifest warmer writes `catalog:{token}:...` (never read) and

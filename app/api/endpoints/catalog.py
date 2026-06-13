@@ -115,27 +115,21 @@ async def get_catalog(
             genre_id = int(parts[1])
             recommendations = await engine.generate_genre_picks(media_type=type, genre_id=genre_id)
         else:
-            # Existing dynamic_movie_N / dynamic_series_N
-            recommendations = await engine.generate_recommendations(media_type=type)
+            # Existing dynamic_movie_N / dynamic_series_N — per-seed row
+            try:
+                row_index = int(id.split("_")[-1])
+            except (ValueError, IndexError):
+                row_index = 0
+            recommendations = await engine.generate_recommendations_for_seed(
+                media_type=type, seed_index=row_index
+            )
 
         # Schedule background cache warming for this config (non-blocking)
         fire_and_forget(task_manager.warm_cache_for_config(config))
 
         # Convert to MetaPoster objects
         items_per_row = 20  # Standard Stremio row size
-
-        # For dynamic_ catalogs, extract row slice by index
-        if id.startswith("dynamic_"):
-            try:
-                row_index = int(id.split("_")[-1])
-                start_idx = row_index * items_per_row
-                end_idx = start_idx + items_per_row
-                row_items = recommendations[start_idx:end_idx]
-            except (ValueError, IndexError):
-                row_items = recommendations[:items_per_row]
-        else:
-            # Curated catalogs: return first N items
-            row_items = recommendations[:items_per_row]
+        row_items = recommendations[:items_per_row]
 
         metas = []
         for item in row_items:

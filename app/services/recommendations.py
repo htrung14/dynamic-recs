@@ -190,16 +190,19 @@ class RecommendationEngine:
                 ]
                 progress_results = await asyncio.gather(*progress_tasks, return_exceptions=True)
 
-                # Sort by progress descending — fully watched items first
+                # Sort by progress descending — fully watched items first.
+                # None means genuinely unknown; sort those after known values
+                # but keep them in the running (fall open).
                 scored = []
                 for imdb_id, prog in zip(candidates, progress_results):
-                    p = prog if isinstance(prog, (int, float)) else 0.5  # default if fetch fails
+                    p = prog if isinstance(prog, (int, float)) else None
                     scored.append((imdb_id, p))
-                scored.sort(key=lambda x: x[1], reverse=True)
+                scored.sort(key=lambda x: (x[1] is not None, x[1] or 0.0), reverse=True)
 
-                # Drop items barely started (< 20% progress)
+                # Accept items with known progress >= 0.2, OR unknown progress
+                # (fall open — prefer including a watched item over missing it).
                 for imdb_id, p in scored:
-                    if p >= 0.2 and imdb_id not in seeds:
+                    if (p is None or p >= 0.2) and imdb_id not in seeds:
                         seeds.append(imdb_id)
                     if len(seeds) >= settings.MAX_SEEDS:
                         break
@@ -703,6 +706,75 @@ class RecommendationEngine:
             "Recommendations served from cache with SWR (key=%s, items=%s)",
             cache_key,
             len(ranked) if ranked else 0,
+        )
+        return ranked or []
+
+    async def generate_recommendations_for_seed(
+        self,
+        media_type: Optional[str],
+        seed_index: int,
+    ) -> List[Dict[str, Any]]:
+        """Generate recommendations from a single seed at the given index.
+
+        Mirrors generate_recommendations auth/cache flow but resolves exactly
+        one seed from the canonical get_seed_items list, so row titles and
+        content align.
+        """
+        # Resolve auth key (same pattern as generate_recommendations)
+        auth_key = await self.stremio.resolve_auth_key(self.config)
+        if not auth_key:
+            logger.warning("No valid Stremio auth key available; skipping per-seed recommendations")
+            return []
+        self.config.stremio_auth_key = auth_key
+
+        seeds = await self.get_seed_items(media_type)
+        if seed_index < 0 or seed_index >= len(seeds):
+            return []
+
+        seed_imdb = seeds[seed_index]
+        cache_key = (
+            f"user:{auth_key}:recs_seed:{media_type or 'all'}:"
+            f"{seed_imdb}:{self.config.cache_fingerprint()}"
+        )
+
+        async def build() -> List[Dict[str, Any]]:
+            data = await self.tmdb.find_by_imdb_id(seed_imdb)
+            if not isinstance(data, dict):
+                return []
+
+            tmdb_id = data.get("tmdb_id") or data.get("id")
+            mtype = data.get("media_type", "movie")
+            if not tmdb_id:
+                return []
+
+            recs = await self._recs_for_one_seed(tmdb_id, mtype)
+            if not recs:
+                return []
+
+            watched = await self.get_watched_items()
+
+            try:
+                recs = await self._attach_external_ids(recs)
+            except Exception as ex:
+                logger.warning(f"External ID attachment failed for seed {seed_imdb}: {ex}")
+
+            recs = self._apply_ratings(recs)
+            ranked = await self.score_and_rank(recs, watched)
+
+            # Filter by media type (same tail as _build_recommendations)
+            if media_type:
+                type_map = {"movie": "movie", "series": "tv"}
+                tmdb_type = type_map.get(media_type)
+                if tmdb_type:
+                    ranked = [item for item in ranked if item.get("media_type") == tmdb_type]
+
+            return ranked
+
+        ranked = await self.cache.stale_while_revalidate(
+            key=cache_key,
+            build_fn=build,
+            ttl=settings.CACHE_TTL_CATALOG,
+            stale_ttl=settings.CACHE_TTL_CATALOG * 3,
         )
         return ranked or []
 
