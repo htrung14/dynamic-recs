@@ -37,7 +37,8 @@ class BackgroundTaskManager:
         if is_new:
             self.active_configs.add(config_key)
             logger.info(f"Registered config for background warming: {config_key[:10]}...")
-            fire_and_forget(self._persist_config(config_key, config, token))
+        # Re-persist on every call so changed configs survive restarts.
+        fire_and_forget(self._persist_config(config_key, config, token))
 
     async def _persist_config(self, config_key: str, config: UserConfig, token: Optional[str]):
         """Save a single config entry to Redis so it survives restarts."""
@@ -77,7 +78,8 @@ class BackgroundTaskManager:
         """
         Warm cache for a single user configuration
         
-        Fetches fresh library history, filters by 50% progress, loved items, then generates recommendations
+        Fetches fresh library history, filters by progress, loved items,
+        then warms per-seed recommendation caches.
         """
         auth_key_short = (config.stremio_auth_key or config.stremio_username_enc or "unknown")[:10]
         logger.info(f"[Background] Starting cache warming for {auth_key_short}...")
@@ -88,15 +90,13 @@ class BackgroundTaskManager:
             await engine.get_seed_items()
             await engine.get_watched_items()
             
-            # Warm cache for movies if enabled
-            if config.include_movies:
-                logger.debug(f"[Background] Warming movie recommendations for {auth_key_short}...")
-                await engine.generate_recommendations(media_type="movie")
-            
-            # Warm cache for series if enabled
-            if config.include_series:
-                logger.debug(f"[Background] Warming series recommendations for {auth_key_short}...")
-                await engine.generate_recommendations(media_type="series")
+            # Warm per-seed recommendation caches for each enabled media type
+            for mt, label in (("movie", "movie"), ("series", "series")):
+                if (mt == "movie" and config.include_movies) or (mt == "series" and config.include_series):
+                    logger.debug(f"[Background] Warming {label} per-seed recs for {auth_key_short}...")
+                    seeds = await engine.get_seed_items(mt)
+                    for i in range(min(len(seeds), settings.MAX_SEEDS)):
+                        await engine.generate_recommendations_for_seed(media_type=mt, seed_index=i)
             
             await engine.close()
             logger.info(f"[Background] Cache warming complete for {auth_key_short}")

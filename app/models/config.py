@@ -53,6 +53,18 @@ class UserConfig(BaseModel):
             self.include_series,
         ))
 
+    def seed_fingerprint(self) -> str:
+        """Fingerprint of fields that change the seed list.
+
+        Toggling loved-items mode, changing the loved token, or flipping
+        exclude_indian must bust the seed cache.
+        """
+        return self._short_hash((
+            self.use_loved_items,
+            self.stremio_loved_token,
+            self.exclude_indian,
+        ))
+
     def taste_fingerprint(self) -> str:
         """Fingerprint of fields that change the taste-profile sample.
 

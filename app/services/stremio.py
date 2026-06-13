@@ -263,6 +263,10 @@ class StremioClient:
         ):
             return 1.0
 
+        # We have duration metadata but no watch signal — genuinely 0%.
+        if duration > 0:
+            return 0.0
+
         return None
 
     async def fetch_watched_progress(self, auth_key: str, imdb_id: str) -> Optional[float]:

@@ -2,7 +2,6 @@
 Configuration Endpoint
 Serves the configuration UI and generates signed tokens
 """
-import asyncio
 import html
 import logging
 from fastapi import APIRouter, HTTPException

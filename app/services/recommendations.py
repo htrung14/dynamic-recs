@@ -121,6 +121,29 @@ class RecommendationEngine:
                 filtered.append(imdb_id)
         return filtered
 
+    async def _filter_indian_imdb_ids(self, imdb_ids: List[str]) -> List[str]:
+        """Drop Indian/Bollywood seeds when exclude_indian is enabled.
+
+        Resolves each IMDB ID via find_by_imdb_id (SWR-cached) and checks
+        _is_indian on the resolved dict.  Items that fail to resolve are
+        kept (fail open).
+        """
+        if not self.config.exclude_indian:
+            return imdb_ids
+
+        tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in imdb_ids]
+        resolved = await asyncio.gather(*tasks, return_exceptions=True)
+
+        kept: List[str] = []
+        for imdb_id, data in zip(imdb_ids, resolved):
+            if isinstance(data, dict):
+                if not self._is_indian(data):
+                    kept.append(imdb_id)
+            else:
+                # Resolution failed — keep (fail open)
+                kept.append(imdb_id)
+        return kept
+
     async def _get_library(self):
         """Fetch and cache the user's Stremio library (single shared call)."""
         auth_key = await self.stremio.resolve_auth_key(self.config)
@@ -146,7 +169,7 @@ class RecommendationEngine:
         if not auth_key:
             logger.warning("No valid Stremio auth key available; skipping seed fetch")
             return []
-        cache_key = f"user:{auth_key}:seeds:{media_type or 'all'}"
+        cache_key = f"user:{auth_key}:seeds:{media_type or 'all'}:{self.config.seed_fingerprint()}"
 
         async def build_seeds() -> List[str]:
             seeds: List[str] = []
@@ -166,6 +189,7 @@ class RecommendationEngine:
                 if media_type:
                     loved = await self._filter_imdb_ids_by_media_type(loved, media_type)
 
+                loved = await self._filter_indian_imdb_ids(loved)
                 loved = loved[: settings.MAX_SEEDS]
                 if loved:
                     seeds.extend(loved)
@@ -180,6 +204,8 @@ class RecommendationEngine:
 
             if media_type:
                 recent = await self._filter_imdb_ids_by_media_type(recent, media_type)
+
+            recent = await self._filter_indian_imdb_ids(recent)
 
             # Fetch watch progress in parallel to prioritize completed items
             candidates = [r for r in recent if r not in seeds][:settings.MAX_SEEDS * 3]
@@ -594,7 +620,7 @@ class RecommendationEngine:
             if imdb_id in watched_set:
                 continue
 
-            if any(pred(item) for pred, label in active_filters):
+            if any(pred(item) for pred, _ in active_filters):
                 continue
             filtered.append(item)
 
@@ -709,6 +735,45 @@ class RecommendationEngine:
         )
         return ranked or []
 
+    async def _build_seed_recs(self, seed_imdb: str, media_type: Optional[str]) -> List[Dict[str, Any]]:
+        """Raw per-seed build — no SWR wrapper.
+
+        Used by both the SWR ``build_fn`` and the clone-engine
+        ``background_refresh`` so the latter never re-enters
+        ``stale_while_revalidate``.
+        """
+        data = await self.tmdb.find_by_imdb_id(seed_imdb)
+        if not isinstance(data, dict):
+            return []
+
+        tmdb_id = data.get("tmdb_id") or data.get("id")
+        mtype = data.get("media_type", "movie")
+        if not tmdb_id:
+            return []
+
+        recs = await self._recs_for_one_seed(tmdb_id, mtype)
+        if not recs:
+            return []
+
+        watched = await self.get_watched_items()
+
+        try:
+            recs = await self._attach_external_ids(recs)
+        except Exception as ex:
+            logger.warning(f"External ID attachment failed for seed {seed_imdb}: {ex}")
+
+        recs = self._apply_ratings(recs)
+        ranked = await self.score_and_rank(recs, watched)
+
+        # Filter by media type (same tail as _build_recommendations)
+        if media_type:
+            type_map = {"movie": "movie", "series": "tv"}
+            tmdb_type = type_map.get(media_type)
+            if tmdb_type:
+                ranked = [item for item in ranked if item.get("media_type") == tmdb_type]
+
+        return ranked
+
     async def generate_recommendations_for_seed(
         self,
         media_type: Optional[str],
@@ -738,43 +803,27 @@ class RecommendationEngine:
         )
 
         async def build() -> List[Dict[str, Any]]:
-            data = await self.tmdb.find_by_imdb_id(seed_imdb)
-            if not isinstance(data, dict):
-                return []
+            return await self._build_seed_recs(seed_imdb, media_type)
 
-            tmdb_id = data.get("tmdb_id") or data.get("id")
-            mtype = data.get("media_type", "movie")
-            if not tmdb_id:
-                return []
-
-            recs = await self._recs_for_one_seed(tmdb_id, mtype)
-            if not recs:
-                return []
-
-            watched = await self.get_watched_items()
-
+        async def background_refresh() -> List[Dict[str, Any]]:
+            # Fresh engine so the request engine's close() in catalog.py
+            # doesn't yank the session out from under the refresh.
+            # Calls the RAW builder — NOT generate_recommendations_for_seed
+            # — so we never re-enter stale_while_revalidate.
+            clone_config = UserConfig.model_validate(self.config.model_dump())
+            clone_config.stremio_auth_key = auth_key
+            engine = RecommendationEngine(clone_config)
             try:
-                recs = await self._attach_external_ids(recs)
-            except Exception as ex:
-                logger.warning(f"External ID attachment failed for seed {seed_imdb}: {ex}")
-
-            recs = self._apply_ratings(recs)
-            ranked = await self.score_and_rank(recs, watched)
-
-            # Filter by media type (same tail as _build_recommendations)
-            if media_type:
-                type_map = {"movie": "movie", "series": "tv"}
-                tmdb_type = type_map.get(media_type)
-                if tmdb_type:
-                    ranked = [item for item in ranked if item.get("media_type") == tmdb_type]
-
-            return ranked
+                return await engine._build_seed_recs(seed_imdb, media_type)
+            finally:
+                await engine.close()
 
         ranked = await self.cache.stale_while_revalidate(
             key=cache_key,
             build_fn=build,
             ttl=settings.CACHE_TTL_CATALOG,
             stale_ttl=settings.CACHE_TTL_CATALOG * 3,
+            refresh_fn=background_refresh,
         )
         return ranked or []
 

@@ -1,7 +1,6 @@
 """
 Health Check & Admin Endpoints
 """
-import asyncio
 from fastapi import APIRouter, Query
 from app.utils.tasks import fire_and_forget
 from app.core.config import settings

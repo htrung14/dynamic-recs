@@ -8,7 +8,6 @@ from app.services.recommendations import RecommendationEngine
 from app.services.background import get_task_manager
 from app.utils.token import decode_config
 from app.utils.tasks import fire_and_forget
-import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
