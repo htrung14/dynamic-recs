@@ -38,29 +38,30 @@ class RecommendationEngine:
     
     def _is_anime(self, item: Dict[str, Any]) -> bool:
         """
-        Detect if an item is anime based on origin country and genres
-        
+        Detect if an item is anime: animated AND Japanese.
+
+        Both conditions must hold.  Western animation (Pixar, Disney) and
+        live-action Japanese film are NOT anime.
+
         Args:
             item: TMDB item data
-            
+
         Returns:
-            True if item appears to be anime, False otherwise
+            True if item is anime, False otherwise
         """
-        # Check origin country (JP = Japan, often anime)
-        origin_country = item.get("origin_country", [])
-        if "JP" in origin_country:
-            return True
-        
-        # Check for animation genre (genre ID 16 in TMDB)
+        # Derive genre ids (genre_ids list or genres list-of-dicts)
         genre_ids = item.get("genre_ids", [])
         if not genre_ids and item.get("genres"):
             genre_ids = [g.get("id") for g in item.get("genres", []) if g.get("id")]
-        
-        # TMDB Animation genre ID is 16
-        if 16 in genre_ids:
-            return True
 
-        return False
+        is_animation = 16 in genre_ids
+
+        is_japanese = (
+            "JP" in (item.get("origin_country") or [])
+            or item.get("original_language") == "ja"
+        )
+
+        return is_animation and is_japanese
 
     def _is_indian(self, item: Dict[str, Any], details: Optional[Dict[str, Any]] = None) -> bool:
         """
@@ -84,6 +85,19 @@ class RecommendationEngine:
         if "IN" in origin:
             return True
         return False
+
+    @staticmethod
+    def _taste_affinity(genre_ids: list, genre_weights: dict) -> float:
+        """Average user-genre weight over MATCHING genres only.
+
+        Dividing by the matched count (not total genre count) prevents
+        multi-genre titles from being penalised when they do match the
+        user's taste profile.
+        """
+        matching = [genre_weights[g] for g in genre_ids if g in genre_weights]
+        if not matching:
+            return 0.0
+        return sum(matching) / len(matching)
 
     async def _filter_imdb_ids_by_media_type(
         self,
@@ -590,14 +604,12 @@ class RecommendationEngine:
             rating_score = item.get("merged_rating", 0.0) / 10.0
 
             # Taste affinity: weighted genre match against full watch history
-            # Instead of binary overlap, sum the user's weight for each matching genre
+            # Average over MATCHING genres only (not total), so multi-genre
+            # titles that do match aren't penalised.
             genre_ids = item.get("genre_ids") or []
             if not genre_ids and item.get("genres"):
                 genre_ids = [g.get("id") for g in item.get("genres", []) if g.get("id")]
-            taste_affinity = 0.0
-            if genre_ids and genre_weights:
-                matching_weight = sum(genre_weights.get(g, 0.0) for g in genre_ids if g)
-                taste_affinity = matching_weight / len(genre_ids)
+            taste_affinity = self._taste_affinity(genre_ids, genre_weights) if genre_ids else 0.0
 
             # Recency bonus
             release_str = item.get("release_date") or item.get("first_air_date") or ""
