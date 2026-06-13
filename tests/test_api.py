@@ -98,7 +98,22 @@ async def test_manifest_endpoint(sample_user_config):
         assert data["id"] == "com.dynamic.recommendations"
         assert data["name"] == "Dynamic Recommendations"
         assert "catalogs" in data
-        assert len(data["catalogs"]) == 10  # 5 movie + 5 series rows
+
+        # Verify curated catalogs are present
+        cat_ids = [c["id"] for c in data["catalogs"]]
+        assert "gems_movie" in cat_ids
+        assert "new_movie" in cat_ids
+        assert "gems_series" in cat_ids
+        assert "new_series" in cat_ids
+
+        # Verify per-seed dynamic rows (config.num_rows=5, both types enabled)
+        movie_dynamic = [c for c in data["catalogs"] if c["id"].startswith("dynamic_movies_")]
+        series_dynamic = [c for c in data["catalogs"] if c["id"].startswith("dynamic_series_")]
+        assert len(movie_dynamic) == 5
+        assert len(series_dynamic) == 5
+
+        # Total = 4 curated + 0 genre rows (no taste profile) + 5+5 dynamic
+        assert len(data["catalogs"]) == 14
 
 
 @pytest.mark.asyncio
@@ -139,8 +154,16 @@ async def test_manifest_movies_only():
         assert response.status_code == 200
         data = response.json()
         
-        assert len(data["catalogs"]) == 3  # Only movie catalogs
+        # With include_series=False, only movie catalogs should appear
+        # Expected: 2 curated (gems_movie, new_movie) + 0 genre rows + 3 dynamic = 5
         assert all(cat["type"] == "movie" for cat in data["catalogs"])
+        cat_ids = [c["id"] for c in data["catalogs"]]
+        assert "gems_movie" in cat_ids
+        assert "new_movie" in cat_ids
+        assert not any(c["id"].startswith("dynamic_series_") for c in data["catalogs"])
+        movie_dynamic = [c for c in data["catalogs"] if c["id"].startswith("dynamic_movies_")]
+        assert len(movie_dynamic) == 3
+        assert len(data["catalogs"]) == 5  # 2 curated + 0 genre + 3 dynamic
 
 
 @pytest.mark.asyncio

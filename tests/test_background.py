@@ -41,7 +41,7 @@ def test_task_manager_init():
     assert manager.running is False
 
 
-def test_register_config(sample_config):
+async def test_register_config(sample_config):
     """Test registering a config for background warming"""
     manager = BackgroundTaskManager()
     
@@ -55,7 +55,7 @@ def test_register_config(sample_config):
     assert len(manager.active_configs) == 1
 
 
-def test_register_multiple_configs():
+async def test_register_multiple_configs():
     """Test registering multiple different configs"""
     manager = BackgroundTaskManager()
     
