@@ -3,6 +3,7 @@ Configuration Endpoint
 Serves the configuration UI and generates signed tokens
 """
 import asyncio
+import html
 import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,6 +15,7 @@ from app.utils.token import encode_config, decode_config
 from app.services.stremio import StremioClient
 from app.services.background import get_task_manager
 from app.utils.crypto import encrypt_secret
+from app.utils.tasks import fire_and_forget
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -91,7 +93,7 @@ async def generate_token(request: ConfigRequest):
         
         # Trigger async cache pre-warming (non-blocking, improves first-request latency)
         # This runs in background and doesn't block the response
-        asyncio.create_task(_pre_warm_cache(user_config, token))
+        fire_and_forget(_pre_warm_cache(user_config, token))
         
         return JSONResponse({
             "success": True,
@@ -611,9 +613,9 @@ async def configure_page(token: Optional[str] = None):
     """
     
     # Replace placeholders with actual values
-    html_content = html_content.replace("__TMDB_DEFAULT__", tmdb_default)
-    html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", stremio_loved_default)
-    html_content = html_content.replace("__STREMIO_AUTH_DEFAULT__", stremio_auth_default)
+    html_content = html_content.replace("__TMDB_DEFAULT__", html.escape(tmdb_default, quote=True))
+    html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", html.escape(stremio_loved_default, quote=True))
+    html_content = html_content.replace("__STREMIO_AUTH_DEFAULT__", html.escape(stremio_auth_default, quote=True))
     html_content = html_content.replace("__NUM_ROWS_DEFAULT__", str(num_rows_default))
     html_content = html_content.replace("__MIN_RATING_DEFAULT__", str(min_rating_default))
     html_content = html_content.replace("__USE_LOVED_CHECKED__", "checked" if use_loved_default else "")

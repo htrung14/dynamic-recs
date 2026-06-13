@@ -227,33 +227,6 @@ class TMDBClient:
         # Redirect to niche recommendations for better quality
         return await self.get_niche_recommendations(tmdb_id, media_type, page)
 
-    async def get_similar(
-        self,
-        tmdb_id: int,
-        media_type: str,
-        page: int = 1
-    ) -> List[Dict[str, Any]]:
-        """Get similar items when recommendations are missing or sparse."""
-        cache_key = f"similar:{media_type}:{tmdb_id}:tmdb:page{page}"
-
-        async def build() -> List[Dict[str, Any]]:
-            endpoint = f"/{media_type}/{tmdb_id}/similar"
-            response = await self._request(endpoint, {"page": page})
-
-            if response and "results" in response:
-                results = response["results"]
-                for item in results:
-                    item.setdefault("media_type", media_type)
-                return results
-            return []
-
-        return await self.cache.stale_while_revalidate(
-            key=cache_key,
-            build_fn=build,
-            ttl=settings.CACHE_TTL_RECOMMENDATIONS,
-            stale_ttl=settings.CACHE_TTL_RECOMMENDATIONS * 3,
-        )
-    
     async def get_details(
         self,
         media_type: str,
@@ -474,69 +447,6 @@ class TMDBClient:
             ttl=settings.CACHE_TTL_RECOMMENDATIONS,
             stale_ttl=settings.CACHE_TTL_RECOMMENDATIONS * 3,
         )
-    
-    async def batch_recommendations(
-        self,
-        items: List[Dict[str, Any]],
-        max_per_item: int = 20
-    ) -> List[Dict[str, Any]]:
-        """
-        Get recommendations for multiple items in parallel
-        
-        Args:
-            items: List of items with 'tmdb_id' and 'media_type'
-            max_per_item: Maximum recommendations per item
-            
-        Returns:
-            Combined list of recommendations
-        """
-        tasks = []
-        
-        for item in items[:settings.MAX_SEEDS]:
-            tmdb_id = item.get("tmdb_id")
-            media_type = item.get("media_type", "movie")
-            
-            if tmdb_id:
-                task = self.get_recommendations(tmdb_id, media_type, page=1)
-                tasks.append(task)
-        
-        # Execute in parallel with concurrency limit
-        results = []
-        for i in range(0, len(tasks), settings.MAX_CONCURRENT_API_CALLS):
-            batch = tasks[i:i + settings.MAX_CONCURRENT_API_CALLS]
-            batch_results = await asyncio.gather(*batch, return_exceptions=True)
-            
-            for result in batch_results:
-                if isinstance(result, list):
-                    results.extend(result[:max_per_item])
-        
-        return results
-
-    async def batch_similar(
-        self,
-        items: List[Dict[str, Any]],
-        max_per_item: int = 20
-    ) -> List[Dict[str, Any]]:
-        """Get similar items for multiple titles as a secondary signal."""
-        tasks = []
-
-        for item in items[:settings.MAX_SEEDS]:
-            tmdb_id = item.get("tmdb_id")
-            media_type = item.get("media_type", "movie")
-
-            if tmdb_id:
-                tasks.append(self.get_similar(tmdb_id, media_type, page=1))
-
-        results = []
-        for i in range(0, len(tasks), settings.MAX_CONCURRENT_API_CALLS):
-            batch = tasks[i:i + settings.MAX_CONCURRENT_API_CALLS]
-            batch_results = await asyncio.gather(*batch, return_exceptions=True)
-
-            for result in batch_results:
-                if isinstance(result, list):
-                    results.extend(result[:max_per_item])
-
-        return results
     
     async def batch_details(
         self,

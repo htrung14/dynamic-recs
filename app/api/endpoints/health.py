@@ -3,6 +3,7 @@ Health Check & Admin Endpoints
 """
 import asyncio
 from fastapi import APIRouter, Query
+from app.utils.tasks import fire_and_forget
 from app.core.config import settings
 from app.services.cache import CacheManager
 from app.services.background import get_task_manager
@@ -34,5 +35,5 @@ async def refresh_all():
     count = len(manager.active_configs)
     if count == 0:
         return {"status": "no_configs", "message": "No users registered yet. Configs are registered on first catalog request."}
-    asyncio.create_task(manager.warm_all_caches())
+    fire_and_forget(manager.warm_all_caches())
     return {"status": "started", "configs": count}

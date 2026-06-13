@@ -11,6 +11,7 @@ from app.services.recommendations import RecommendationEngine
 from app.services.stremio import StremioClient
 from app.models.config import UserConfig
 from app.core.config import settings
+from app.utils.tasks import fire_and_forget
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class BackgroundTaskManager:
         if is_new:
             self.active_configs.add(config_key)
             logger.info(f"Registered config for background warming: {config_key[:10]}...")
-            asyncio.create_task(self._persist_config(config_key, config, token))
+            fire_and_forget(self._persist_config(config_key, config, token))
 
     async def _persist_config(self, config_key: str, config: UserConfig, token: Optional[str]):
         """Save a single config entry to Redis so it survives restarts."""

@@ -10,6 +10,7 @@ import time
 from typing import Optional, Any, Awaitable, Callable, Tuple, Dict
 import redis.asyncio as redis
 from app.core.config import settings
+from app.utils.tasks import fire_and_forget
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +295,7 @@ class CacheManager:
                             except Exception:
                                 pass
 
-                    asyncio.create_task(_revalidate())
+                    fire_and_forget(_revalidate())
                 else:
                     # Slight jitter to reduce simultaneous refresh attempts after lock expiry
                     await asyncio.sleep(random.uniform(0.01, 0.05))

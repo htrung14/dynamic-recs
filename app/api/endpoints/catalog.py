@@ -7,6 +7,7 @@ from app.models.stremio import CatalogResponse, MetaPoster
 from app.services.recommendations import RecommendationEngine
 from app.services.background import get_task_manager
 from app.utils.token import decode_config
+from app.utils.tasks import fire_and_forget
 import asyncio
 import logging
 
@@ -118,7 +119,7 @@ async def get_catalog(
             recommendations = await engine.generate_recommendations(media_type=type)
 
         # Schedule background cache warming for this config (non-blocking)
-        asyncio.create_task(task_manager.warm_cache_for_config(config))
+        fire_and_forget(task_manager.warm_cache_for_config(config))
 
         # Convert to MetaPoster objects
         items_per_row = 20  # Standard Stremio row size

@@ -5,6 +5,7 @@ Returns the Stremio addon manifest with dynamic catalogs
 import json
 import logging
 import asyncio
+from app.utils.tasks import fire_and_forget
 from fastapi import APIRouter, HTTPException, Path, Response
 from app.models.stremio import Manifest, ManifestCatalog
 from app.utils.token import decode_config
@@ -233,7 +234,7 @@ async def get_manifest(
     logger.info(f"Manifest generated with {len(catalogs)} catalogs")
     
     # Trigger background catalog warming when manifest is requested
-    asyncio.create_task(_warm_and_cache_catalogs(token, config, catalogs))
+    fire_and_forget(_warm_and_cache_catalogs(token, config, catalogs))
     
     return manifest_dict
 
