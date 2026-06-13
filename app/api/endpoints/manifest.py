@@ -104,32 +104,33 @@ async def get_manifest(
             return imdb_id, None
 
     # Movie seed titles
-    movie_title_tasks = [
-        _resolve_title(imdb_id) for imdb_id in movie_seeds[:config.num_rows]
-    ]
-    movie_title_results = await asyncio.gather(*movie_title_tasks) if movie_title_tasks else []
+    if config.include_movies:
+        movie_title_tasks = [
+            _resolve_title(imdb_id) for imdb_id in movie_seeds[:config.num_rows]
+        ]
+        movie_title_results = await asyncio.gather(*movie_title_tasks) if movie_title_tasks else []
 
-    for i in range(config.num_rows):
-        if i < len(movie_seeds):
-            imdb_id, tmdb_data = movie_title_results[i] if i < len(movie_title_results) else (movie_seeds[i], None)
-            is_loved = imdb_id in loved_set_movies
+        for i in range(config.num_rows):
+            if i < len(movie_seeds):
+                imdb_id, tmdb_data = movie_title_results[i] if i < len(movie_title_results) else (movie_seeds[i], None)
+                is_loved = imdb_id in loved_set_movies
 
-            if isinstance(tmdb_data, Exception):
-                tmdb_data = None
+                if isinstance(tmdb_data, Exception):
+                    tmdb_data = None
 
-            if tmdb_data:
-                title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                prefix = "🎬 Because you loved" if is_loved else "🎬 Because you watched"
-                catalog_name = f"{prefix} {title}" if title else f"🎬 Recommended Movies #{i+1}"
+                if tmdb_data:
+                    title = tmdb_data.get("title") or tmdb_data.get("name", "")
+                    prefix = "🎬 Because you loved" if is_loved else "🎬 Because you watched"
+                    catalog_name = f"{prefix} {title}" if title else f"🎬 Recommended Movies #{i+1}"
+                else:
+                    prefix = "🎬 Because you loved" if is_loved else "🎬 Recommended Movies"
+                    catalog_name = f"{prefix} #{i+1}"
             else:
-                prefix = "🎬 Because you loved" if is_loved else "🎬 Recommended Movies"
-                catalog_name = f"{prefix} #{i+1}"
-        else:
-            catalog_name = f"🎬 Recommended Movies #{i+1}"
+                catalog_name = f"🎬 Recommended Movies #{i+1}"
 
-        catalogs.append(
-            ManifestCatalog(type="movie", id=f"dynamic_movies_{i}", name=catalog_name)
-        )
+            catalogs.append(
+                ManifestCatalog(type="movie", id=f"dynamic_movies_{i}", name=catalog_name)
+            )
 
     # Series seed titles
     if config.include_series:

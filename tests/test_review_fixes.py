@@ -167,3 +167,41 @@ class TestSeedRecsNoSrwReentry:
         engine._build_seed_recs.assert_called_once_with("ttSeed", "movie")
 
         monkeypatch_ctx.stop()
+
+
+class TestFilterIndianDetailsFallback:
+
+    @pytest.mark.asyncio
+    async def test_origin_country_caught_via_details_fallback(self):
+        """An item with en language but IN origin_country (from details)
+        must be filtered when exclude_indian=True."""
+        engine = _engine(exclude_indian=True)
+
+        async def fake_find(imdb_id):
+            return {"id": 99, "tmdb_id": 99, "media_type": "movie",
+                    "original_language": "en"}
+
+        async def fake_batch_details(items):
+            return {99: {"origin_country": ["IN"]}}
+
+        engine.tmdb.find_by_imdb_id = fake_find
+        engine.tmdb.batch_details = fake_batch_details
+        result = await engine._filter_indian_imdb_ids(["tt99"])
+        assert result == []  # filtered out via origin_country
+
+    @pytest.mark.asyncio
+    async def test_non_indian_kept_when_details_lack_in(self):
+        """An item with en language and no IN origin_country should be kept."""
+        engine = _engine(exclude_indian=True)
+
+        async def fake_find(imdb_id):
+            return {"id": 88, "tmdb_id": 88, "media_type": "movie",
+                    "original_language": "en"}
+
+        async def fake_batch_details(items):
+            return {88: {"origin_country": ["US"]}}
+
+        engine.tmdb.find_by_imdb_id = fake_find
+        engine.tmdb.batch_details = fake_batch_details
+        result = await engine._filter_indian_imdb_ids(["tt88"])
+        assert result == ["tt88"]

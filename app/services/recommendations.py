@@ -125,8 +125,9 @@ class RecommendationEngine:
         """Drop Indian/Bollywood seeds when exclude_indian is enabled.
 
         Resolves each IMDB ID via find_by_imdb_id (SWR-cached) and checks
-        _is_indian on the resolved dict.  Items that fail to resolve are
-        kept (fail open).
+        _is_indian on the resolved dict, with a batch_details fallback for
+        origin_country (which /find results don't carry).  Items that fail
+        to resolve are kept (fail open).
         """
         if not self.config.exclude_indian:
             return imdb_ids
@@ -134,10 +135,18 @@ class RecommendationEngine:
         tasks = [self.tmdb.find_by_imdb_id(imdb_id) for imdb_id in imdb_ids]
         resolved = await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Collect resolved dicts for a batch_details call so we can check
+        # origin_country (not present on /find results).
+        resolved_dicts = [d for d in resolved if isinstance(d, dict)]
+        details_map: dict = {}
+        if resolved_dicts:
+            details_map = await self.tmdb.batch_details(resolved_dicts)
+
         kept: List[str] = []
         for imdb_id, data in zip(imdb_ids, resolved):
             if isinstance(data, dict):
-                if not self._is_indian(data):
+                det = details_map.get(data.get("id") or data.get("tmdb_id"))
+                if not self._is_indian(data, det):
                     kept.append(imdb_id)
             else:
                 # Resolution failed — keep (fail open)

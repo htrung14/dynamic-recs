@@ -167,6 +167,48 @@ async def test_manifest_movies_only():
 
 
 @pytest.mark.asyncio
+async def test_manifest_series_only():
+    """Test manifest with only series enabled"""
+    from app.models.config import UserConfig
+
+    test_config = UserConfig(
+        stremio_auth_key="VGVzdEtleUZha2VTdHJlbWlvQXV0aEtleUJhc2U2NA==",
+        stremio_username_enc="dGVzdF91c2VybmFtZQ==",
+        stremio_password_enc="dGVzdF9wYXNzd29yZA==",
+        stremio_loved_token="test_loved_token",
+        tmdb_api_key="7c1d4ee5a7063e9f116b6ca2a0850143",
+        num_rows=3,
+        min_rating=6.0,
+        use_loved_items=True,
+        include_movies=False,
+        include_series=True
+    )
+
+    app = create_app()
+    token = encode_config(test_config)
+
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.get(f"/{token}/manifest.json")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # With include_movies=False, only series catalogs should appear
+        assert all(cat["type"] == "series" for cat in data["catalogs"])
+        cat_ids = [c["id"] for c in data["catalogs"]]
+        assert "gems_series" in cat_ids
+        assert "new_series" in cat_ids
+        # No movie catalogs at all
+        assert not any(c["id"].startswith("dynamic_movies_") for c in data["catalogs"])
+        assert "gems_movie" not in cat_ids
+        assert "new_movie" not in cat_ids
+        assert not any(c["id"].startswith("genre_") and c["id"].endswith("_movie") for c in data["catalogs"])
+        series_dynamic = [c for c in data["catalogs"] if c["id"].startswith("dynamic_series_")]
+        assert len(series_dynamic) == 3
+        assert len(data["catalogs"]) == 5  # 2 curated + 0 genre + 3 dynamic
+
+
+@pytest.mark.asyncio
 async def test_catalog_invalid_token():
     """Test catalog endpoint with invalid token"""
     app = create_app()
