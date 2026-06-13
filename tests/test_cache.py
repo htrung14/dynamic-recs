@@ -8,6 +8,21 @@ import pytest
 # These are integration tests that should be run when Redis is available
 # For unit testing, mock the Redis client or skip these tests
 
+@pytest.fixture(autouse=True)
+async def _reset_cache_singleton():
+    """Reset CacheManager's cached redis client between tests.
+
+    The CacheManager is a singleton that persists a _redis_client across
+    tests.  When a previous test closes the event loop the cached client's
+    connection is broken, causing the next test to fail with 'Event loop
+    is closed'.  Clearing _redis_client before each test forces a fresh
+    connection.
+    """
+    from app.services.cache import CacheManager
+    CacheManager._redis_client = None
+    yield
+    CacheManager._redis_client = None
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_cache_set_and_get():
@@ -26,7 +41,10 @@ async def test_cache_set_and_get():
     except Exception:
         pytest.skip("Redis not available")
     finally:
-        await cache.close()
+        try:
+            await cache.close()
+        except RuntimeError:
+            pass  # Event loop may already be closed from prior test teardown
 
 
 @pytest.mark.asyncio

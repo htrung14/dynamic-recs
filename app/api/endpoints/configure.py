@@ -2,7 +2,7 @@
 Configuration Endpoint
 Serves the configuration UI and generates signed tokens
 """
-import asyncio
+import html
 import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -14,6 +14,7 @@ from app.utils.token import encode_config, decode_config
 from app.services.stremio import StremioClient
 from app.services.background import get_task_manager
 from app.utils.crypto import encrypt_secret
+from app.utils.tasks import fire_and_forget
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,6 +32,7 @@ class ConfigRequest(BaseModel):
     include_movies: bool = True
     include_series: bool = True
     exclude_anime: bool = True
+    exclude_indian: bool = True
     stremio_loved_token: Optional[str] = None
 
 
@@ -78,6 +80,7 @@ async def generate_token(request: ConfigRequest):
             include_series=request.include_series,
             stremio_loved_token=request.stremio_loved_token or settings.STREMIO_LOVED_TOKEN,
             exclude_anime=request.exclude_anime,
+            exclude_indian=request.exclude_indian,
         )
         
         # Generate signed token
@@ -89,7 +92,7 @@ async def generate_token(request: ConfigRequest):
         
         # Trigger async cache pre-warming (non-blocking, improves first-request latency)
         # This runs in background and doesn't block the response
-        asyncio.create_task(_pre_warm_cache(user_config, token))
+        fire_and_forget(_pre_warm_cache(user_config, token))
         
         return JSONResponse({
             "success": True,
@@ -139,6 +142,7 @@ async def configure_page(token: Optional[str] = None):
         include_movies_default = existing_config.include_movies
         include_series_default = existing_config.include_series
         exclude_anime_default = existing_config.exclude_anime
+        exclude_indian_default = existing_config.exclude_indian
     else:
         num_rows_default = 5
         min_rating_default = 6.0
@@ -146,6 +150,7 @@ async def configure_page(token: Optional[str] = None):
         include_movies_default = True
         include_series_default = True
         exclude_anime_default = True
+        exclude_indian_default = True
         stremio_auth_default = ""
 
     html_content = """
@@ -398,6 +403,13 @@ async def configure_page(token: Optional[str] = None):
                 </div>
             </div>
 
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="exclude_indian" __EXCLUDE_INDIAN_CHECKED__>
+                    <label for="exclude_indian">Exclude Indian / Bollywood</label>
+                </div>
+            </div>
+
             <button type="submit">Generate Install URL</button>
             
             <div class="error" id="error"></div>
@@ -478,7 +490,8 @@ async def configure_page(token: Optional[str] = None):
                 use_loved_items: document.getElementById('use_loved').checked,
                 include_movies: document.getElementById('include_movies').checked,
                 include_series: document.getElementById('include_series').checked,
-                exclude_anime: document.getElementById('exclude_anime').checked
+                exclude_anime: document.getElementById('exclude_anime').checked,
+                exclude_indian: document.getElementById('exclude_indian').checked
             };
             
             const hasAuth = !!config.stremio_auth_key;
@@ -599,14 +612,15 @@ async def configure_page(token: Optional[str] = None):
     """
     
     # Replace placeholders with actual values
-    html_content = html_content.replace("__TMDB_DEFAULT__", tmdb_default)
-    html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", stremio_loved_default)
-    html_content = html_content.replace("__STREMIO_AUTH_DEFAULT__", stremio_auth_default)
+    html_content = html_content.replace("__TMDB_DEFAULT__", html.escape(tmdb_default, quote=True))
+    html_content = html_content.replace("__STREMIO_LOVED_DEFAULT__", html.escape(stremio_loved_default, quote=True))
+    html_content = html_content.replace("__STREMIO_AUTH_DEFAULT__", html.escape(stremio_auth_default, quote=True))
     html_content = html_content.replace("__NUM_ROWS_DEFAULT__", str(num_rows_default))
     html_content = html_content.replace("__MIN_RATING_DEFAULT__", str(min_rating_default))
     html_content = html_content.replace("__USE_LOVED_CHECKED__", "checked" if use_loved_default else "")
     html_content = html_content.replace("__INCLUDE_MOVIES_CHECKED__", "checked" if include_movies_default else "")
     html_content = html_content.replace("__INCLUDE_SERIES_CHECKED__", "checked" if include_series_default else "")
     html_content = html_content.replace("__EXCLUDE_ANIME_CHECKED__", "checked" if exclude_anime_default else "")
+    html_content = html_content.replace("__EXCLUDE_INDIAN_CHECKED__", "checked" if exclude_indian_default else "")
 
     return html_content

@@ -2,15 +2,11 @@
 Manifest Endpoint
 Returns the Stremio addon manifest with dynamic catalogs
 """
-import json
 import logging
 import asyncio
 from fastapi import APIRouter, HTTPException, Path, Response
 from app.models.stremio import Manifest, ManifestCatalog
 from app.utils.token import decode_config
-from app.services.stremio import StremioClient
-from app.services.tmdb import TMDBClient
-from app.services.cache import CacheManager
 from app.services.recommendations import RecommendationEngine
 
 logger = logging.getLogger(__name__)
@@ -47,45 +43,16 @@ async def get_manifest(
     if not config:
         raise HTTPException(status_code=401, detail="Invalid configuration token")
     
-    # Fetch seed items for personalized catalog names
-    stremio = StremioClient()
-    tmdb = TMDBClient(config.tmdb_api_key)
-    
-    try:
-        auth_key = await stremio.resolve_auth_key(config)
-        if not auth_key:
-            logger.warning("Stremio authentication failed - using generic catalog names")
-            recent_watches = []
-        else:
-            library = await stremio.fetch_library(auth_key)
-            recent_watches = stremio.extract_recently_watched(library, limit=max(config.num_rows, 10))
-    except Exception as e:
-        logger.warning(f"Failed to fetch library for manifest: {e}")
-        recent_watches = []
-
-    # Loved items (for titles) if enabled
-    loved_movies = []
-    loved_series = []
-    if config.use_loved_items:
-        try:
-            loved_movies = await stremio.fetch_loved_catalog("movie", token=config.stremio_loved_token)
-            loved_series = await stremio.fetch_loved_catalog("series", token=config.stremio_loved_token)
-        except Exception as e:
-            logger.debug(f"Failed to fetch loved catalogs: {e}")
-    
     # Build catalogs based on user configuration
     catalogs = []
 
-    # --- Curated catalogs (appear first in Stremio) ---
-    # Get user's top genres for personalized curated rows
+    # Single engine for genre profile + seed items + title resolution
     engine = RecommendationEngine(config, token=token)
     try:
         user_genres = await engine.get_user_genre_profile()
     except Exception as e:
         logger.warning(f"Failed to get user genre profile: {e}")
         user_genres = []
-    finally:
-        await engine.close()
 
     top_genres = user_genres[:2]  # Keep it to 2 genre rows to avoid clutter
 
@@ -104,114 +71,98 @@ async def get_manifest(
             catalogs.append(ManifestCatalog(type="series", id=f"genre_{gid}_series", name=f"🎯 {gname} For You"))
 
     # --- Personalized "Because you watched" catalogs ---
+    # Use the same canonical seed list as catalog.py so titles match content.
 
-    # Add movie catalogs if enabled
+    # Loved items (for label only: "loved" vs "watched")
+    loved_movies: list = []
+    loved_series: list = []
+    if config.use_loved_items:
+        try:
+            loved_movies = await engine.stremio.fetch_loved_catalog("movie", token=config.stremio_loved_token) or []
+            loved_series = await engine.stremio.fetch_loved_catalog("series", token=config.stremio_loved_token) or []
+        except Exception as e:
+            logger.debug(f"Failed to fetch loved catalogs: {e}")
+
+    loved_set_movies = set(loved_movies)
+    loved_set_series = set(loved_series)
+
+    # Fetch canonical seed lists (same SWR-cached data catalog.py will use)
+    movie_seeds: list = []
+    series_seeds: list = []
     if config.include_movies:
-        # Prefer loved seeds first, then fall back to recent watches
-        seeds_for_movies = (loved_movies or []) + ([w for w in recent_watches if w not in loved_movies] if recent_watches else [])
-        if loved_movies:
-            logger.debug(f"Because you loved (movies) seeds count: {len(loved_movies)}")
-        watched_only = [w for w in recent_watches if w not in loved_movies] if recent_watches else []
-        if watched_only:
-            logger.debug(f"Because you watched (movies) seeds count: {len(watched_only)}")
-        if seeds_for_movies:
-            logger.debug(f"Movies catalog seeds combined count: {len(seeds_for_movies)}")
-
-        movie_seed_count = min(config.num_rows, len(seeds_for_movies))
-        movie_tmdb_results = []
-        if movie_seed_count:
-            movie_seed_ids = seeds_for_movies[:movie_seed_count]
-            movie_tmdb_results = await asyncio.gather(
-                *[tmdb.find_by_imdb_id(imdb_id) for imdb_id in movie_seed_ids],
-                return_exceptions=True,
-            )
-
-        for i in range(config.num_rows):
-            # Get title for this seed if available
-            if i < len(seeds_for_movies):
-                imdb_id = seeds_for_movies[i]
-                is_loved_seed = i < len(loved_movies)
-
-                tmdb_data = movie_tmdb_results[i] if i < len(movie_tmdb_results) else None
-                if isinstance(tmdb_data, Exception):
-                    logger.debug(f"Failed to get title for {imdb_id}: {tmdb_data}")
-                    prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
-                    catalog_name = f"{prefix} #{i+1}"
-                elif tmdb_data:
-                    title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                    prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Because you watched"
-                    catalog_name = f"{prefix} {title}" if title else f"{prefix}"
-                else:
-                    prefix = "🎬 Because you loved" if is_loved_seed else "🎬 Recommended Movies"
-                    catalog_name = f"{prefix} #{i+1}"
-            else:
-                # No seed available; default to generic row name
-                prefix = "🎬 Recommended Movies"
-                catalog_name = f"{prefix} #{i+1}"
-            
-            catalogs.append(
-                ManifestCatalog(
-                    type="movie",
-                    id=f"dynamic_movies_{i}",
-                    name=catalog_name
-                )
-            )
-    
-    # Add series catalogs if enabled
+        movie_seeds = await engine.get_seed_items("movie")
     if config.include_series:
-        # Prefer loved seeds first, then fall back to recent watches
-        seeds_for_series = (loved_series or []) + ([w for w in recent_watches if w not in loved_series] if recent_watches else [])
-        if loved_series:
-            logger.debug(f"Because you loved (series) seeds count: {len(loved_series)}")
-        watched_only_series = [w for w in recent_watches if w not in loved_series] if recent_watches else []
-        if watched_only_series:
-            logger.debug(f"Because you watched (series) seeds count: {len(watched_only_series)}")
-        if seeds_for_series:
-            logger.debug(f"Series catalog seeds combined count: {len(seeds_for_series)}")
+        series_seeds = await engine.get_seed_items("series")
 
-        series_seed_count = min(config.num_rows, len(seeds_for_series))
-        series_tmdb_results = []
-        if series_seed_count:
-            series_seed_ids = seeds_for_series[:series_seed_count]
-            series_tmdb_results = await asyncio.gather(
-                *[tmdb.find_by_imdb_id(imdb_id) for imdb_id in series_seed_ids],
-                return_exceptions=True,
-            )
+    # Resolve TMDB titles for the first num_rows seeds in parallel
+    async def _resolve_title(imdb_id: str):
+        """Return (imdb_id, tmdb_data_or_None)."""
+        try:
+            return imdb_id, await engine.tmdb.find_by_imdb_id(imdb_id)
+        except Exception as e:
+            logger.debug(f"Failed to get title for {imdb_id}: {e}")
+            return imdb_id, None
+
+    # Movie seed titles
+    if config.include_movies:
+        movie_title_tasks = [
+            _resolve_title(imdb_id) for imdb_id in movie_seeds[:config.num_rows]
+        ]
+        movie_title_results = await asyncio.gather(*movie_title_tasks) if movie_title_tasks else []
 
         for i in range(config.num_rows):
-            # Get title for this seed if available
-            if i < len(seeds_for_series):
-                imdb_id = seeds_for_series[i]
-                is_loved_seed = i < len(loved_series)
+            if i < len(movie_seeds):
+                imdb_id, tmdb_data = movie_title_results[i] if i < len(movie_title_results) else (movie_seeds[i], None)
+                is_loved = imdb_id in loved_set_movies
 
-                tmdb_data = series_tmdb_results[i] if i < len(series_tmdb_results) else None
                 if isinstance(tmdb_data, Exception):
-                    logger.debug(f"Failed to get title for {imdb_id}: {tmdb_data}")
-                    prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
-                    catalog_name = f"{prefix} #{i+1}"
-                elif tmdb_data:
+                    tmdb_data = None
+
+                if tmdb_data:
                     title = tmdb_data.get("title") or tmdb_data.get("name", "")
-                    prefix = "📺 Because you loved" if is_loved_seed else "📺 Because you watched"
-                    catalog_name = f"{prefix} {title}" if title else f"{prefix}"
+                    prefix = "🎬 Because you loved" if is_loved else "🎬 Because you watched"
+                    catalog_name = f"{prefix} {title}" if title else f"🎬 Recommended Movies #{i+1}"
                 else:
-                    prefix = "📺 Because you loved" if is_loved_seed else "📺 Recommended Series"
+                    prefix = "🎬 Because you loved" if is_loved else "🎬 Recommended Movies"
                     catalog_name = f"{prefix} #{i+1}"
             else:
-                # No seed available; default to generic row name
-                prefix = "📺 Recommended Series"
-                catalog_name = f"{prefix} #{i+1}"
-            
+                catalog_name = f"🎬 Recommended Movies #{i+1}"
+
             catalogs.append(
-                ManifestCatalog(
-                    type="series",
-                    id=f"dynamic_series_{i}",
-                    name=catalog_name
-                )
+                ManifestCatalog(type="movie", id=f"dynamic_movies_{i}", name=catalog_name)
             )
-    
-    # Close connections
-    await stremio.close()
-    await tmdb.close()
+
+    # Series seed titles
+    if config.include_series:
+        series_title_tasks = [
+            _resolve_title(imdb_id) for imdb_id in series_seeds[:config.num_rows]
+        ]
+        series_title_results = await asyncio.gather(*series_title_tasks) if series_title_tasks else []
+
+        for i in range(config.num_rows):
+            if i < len(series_seeds):
+                imdb_id, tmdb_data = series_title_results[i] if i < len(series_title_results) else (series_seeds[i], None)
+                is_loved = imdb_id in loved_set_series
+
+                if isinstance(tmdb_data, Exception):
+                    tmdb_data = None
+
+                if tmdb_data:
+                    title = tmdb_data.get("title") or tmdb_data.get("name", "")
+                    prefix = "📺 Because you loved" if is_loved else "📺 Because you watched"
+                    catalog_name = f"{prefix} {title}" if title else f"📺 Recommended Series #{i+1}"
+                else:
+                    prefix = "📺 Because you loved" if is_loved else "📺 Recommended Series"
+                    catalog_name = f"{prefix} #{i+1}"
+            else:
+                catalog_name = f"📺 Recommended Series #{i+1}"
+
+            catalogs.append(
+                ManifestCatalog(type="series", id=f"dynamic_series_{i}", name=catalog_name)
+            )
+
+    # Close engine connections
+    await engine.close()
     
     # Build manifest with behavior hints including configure URL
     from app.core.config import settings
@@ -232,86 +183,4 @@ async def get_manifest(
     
     logger.info(f"Manifest generated with {len(catalogs)} catalogs")
     
-    # Trigger background catalog warming when manifest is requested
-    asyncio.create_task(_warm_and_cache_catalogs(token, config, catalogs))
-    
     return manifest_dict
-
-
-async def _warm_and_cache_catalogs(token: str, config, catalogs: list):
-    """
-    Pull catalog items from cache or regenerate if stale.
-    Runs in background when manifest.json is requested.
-    
-    Args:
-        token: User configuration token
-        config: User configuration
-        catalogs: List of ManifestCatalog objects
-    """
-    from app.api.endpoints.catalog import convert_to_meta_poster
-    
-    cache = CacheManager()
-    try:
-        for catalog in catalogs:
-            catalog_id = catalog.id
-            media_type = catalog.type
-            cache_key = f"catalog:{token}:{media_type}:{catalog_id}"
-            
-            # Check if catalog is cached and fresh
-            cached_value, is_stale = await cache.get_with_freshness(cache_key)
-            
-            if cached_value and not is_stale:
-                logger.debug(f"[Manifest Warm] Catalog {catalog_id} is fresh in cache")
-                continue
-            
-            # Cache miss or stale - regenerate in background
-            logger.info(f"[Manifest Warm] Regenerating {'stale ' if is_stale else ''}catalog {catalog_id}")
-            try:
-                engine = RecommendationEngine(config, token=token)
-                recommendations = await engine.generate_recommendations(media_type=media_type)
-                await engine.close()
-                
-                if recommendations:
-                    # Convert to MetaPoster format before caching
-                    # Skip items without valid IMDB ID (same logic as catalog.py)
-                    metas = []
-                    for item in recommendations[:100]:
-                        external_ids = item.get("external_ids", {})
-                        imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
-                        if not imdb_id:
-                            logger.debug(
-                                "[Manifest Warm] Skipping item without IMDB ID: %s (tmdb_id=%s)",
-                                item.get("title") or item.get("name"),
-                                item.get("id")
-                            )
-                            continue
-                        
-                        try:
-                            meta = convert_to_meta_poster(item, media_type)
-                            metas.append(meta)
-                        except Exception as ex:
-                            logger.warning(
-                                "[Manifest Warm] Failed to convert item: %s (tmdb_id=%s): %s",
-                                item.get("title") or item.get("name"),
-                                item.get("id"),
-                                ex
-                            )
-                    
-                    if metas:
-                        # Cache MetaPoster objects as dicts
-                        await cache.set(
-                            cache_key,
-                            [m.model_dump() for m in metas],
-                            ttl=3600  # 1 hour TTL
-                        )
-                        logger.info(f"[Manifest Warm] Cached {len(metas)} items for {catalog_id}")
-                    else:
-                        logger.warning(f"[Manifest Warm] No valid items for {catalog_id}")
-                else:
-                    logger.warning(f"[Manifest Warm] No recommendations for {catalog_id}")
-            except Exception as e:
-                logger.error(f"[Manifest Warm] Failed to warm {catalog_id}: {e}")
-    except Exception as e:
-        logger.error(f"[Manifest Warm] Cache warming failed: {e}")
-    finally:
-        await cache.close()
