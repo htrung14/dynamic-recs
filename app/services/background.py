@@ -29,9 +29,12 @@ class BackgroundTaskManager:
     def register_config(self, config: UserConfig, token: Optional[str] = None):
         """Register a user config for background cache warming and persist to Redis."""
         config_key = config.stremio_auth_key or config.stremio_username_enc or "unknown"
-        if config_key not in self.active_configs:
+        # Always overwrite with the latest config so that returning users whose
+        # settings changed get the updated (config, token) for periodic warming.
+        is_new = config_key not in self.active_configs
+        self.config_cache[config_key] = (config, token)
+        if is_new:
             self.active_configs.add(config_key)
-            self.config_cache[config_key] = (config, token)
             logger.info(f"Registered config for background warming: {config_key[:10]}...")
             asyncio.create_task(self._persist_config(config_key, config, token))
 

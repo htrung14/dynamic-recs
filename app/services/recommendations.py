@@ -16,6 +16,10 @@ from app.utils.helpers import deduplicate_recommendations, score_by_frequency
 
 logger = logging.getLogger(__name__)
 
+# TMDB original_language codes for major Indian film/TV industries:
+# Hindi, Tamil, Telugu, Malayalam, Kannada, Bengali, Punjabi, Marathi.
+INDIAN_LANGUAGES = frozenset({"hi", "ta", "te", "ml", "kn", "bn", "pa", "mr"})
+
 
 class RecommendationEngine:
     """Generate personalized recommendations"""
@@ -55,9 +59,32 @@ class RecommendationEngine:
         # TMDB Animation genre ID is 16
         if 16 in genre_ids:
             return True
-        
+
         return False
-    
+
+    def _is_indian(self, item: Dict[str, Any], details: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Detect Indian/Bollywood content by language or origin country.
+
+        Flags an item when its TMDB ``original_language`` is a major Indian
+        film language OR its ``origin_country`` includes India. ``original_language``
+        and ``origin_country`` are not always present on list-level items, so an
+        optional ``details`` dict (the full TMDB detail object) is consulted as a
+        fallback. Fails open: an item with no language/country signal is NOT flagged.
+        """
+        lang = item.get("original_language")
+        origin = item.get("origin_country") or []
+        if details:
+            lang = lang or details.get("original_language")
+            if not origin:
+                origin = details.get("origin_country") or []
+
+        if lang in INDIAN_LANGUAGES:
+            return True
+        if "IN" in origin:
+            return True
+        return False
+
     async def _filter_imdb_ids_by_media_type(
         self,
         imdb_ids: List[str],
@@ -243,6 +270,19 @@ class RecommendationEngine:
                         item["genre_ids"] = genre_ids
                 seed_genres.update(g for g in genre_ids if isinstance(g, int))
 
+            # Drop Indian seeds so we don't generate recs from them.
+            # Must run after seed_genres is collected (above) but before
+            # per-seed rec generation (below).  Details fallback covers items
+            # whose base object lacks original_language / origin_country.
+            if self.config.exclude_indian:
+                kept = []
+                for it in tmdb_items:
+                    tid = it.get("id")
+                    det = details_map.get(tid) if tid is not None else None
+                    if not self._is_indian(it, det):
+                        kept.append(it)
+                tmdb_items = kept
+
         if not tmdb_items:
             return [], seed_genres
 
@@ -360,7 +400,7 @@ class RecommendationEngine:
         library, auth_key = await self._get_library()
         if not auth_key or not library:
             return {"genre_weights": {}, "top_genres": [], "top_keywords": []}
-        cache_key = f"user:{auth_key}:taste:v3"
+        cache_key = f"user:{auth_key}:taste:v4:{self.config.taste_fingerprint()}"
 
         async def build() -> Dict[str, Any]:
             # Sample up to MAX_TASTE_SAMPLE recent watches for the profile
@@ -379,6 +419,19 @@ class RecommendationEngine:
 
             # Batch details for genre enrichment
             details_map = await self.tmdb.batch_details(tmdb_items)
+
+            # Drop Indian items from the taste-profile sample so the profile
+            # doesn't chase Bollywood genres when the user has exclude_indian on.
+            if self.config.exclude_indian:
+                kept = []
+                for it in tmdb_items:
+                    tid = it.get("id")
+                    det = details_map.get(tid) if tid is not None else None
+                    if not self._is_indian(it, det):
+                        kept.append(it)
+                tmdb_items = kept
+            if not tmdb_items:
+                return {"genre_weights": {}, "top_genres": [], "top_keywords": []}
 
             # Build genre frequency counter with recency weighting
             # Most recent item gets weight 1.0, oldest gets 0.3
@@ -505,17 +558,28 @@ class RecommendationEngine:
         genre_weights = profile.get("genre_weights", {})
 
         watched_set = set(watched)
-        filtered = []
 
+        # Content-exclusion filters: (enabled_flag, predicate, label).
+        # Add new content filters here instead of copy-pasting if-blocks.
+        exclusion_filters = [
+            (self.config.exclude_anime, self._is_anime, "anime"),
+            (self.config.exclude_indian, self._is_indian, "indian"),
+        ]
+        active_filters = [(pred, label) for enabled, pred, label in exclusion_filters if enabled]
+
+        filtered = []
         for item in items:
             external_ids = item.get("external_ids", {})
             imdb_id = external_ids.get("imdb_id") or item.get("imdb_id")
 
-            if imdb_id not in watched_set:
-                if self.config.exclude_anime and self._is_anime(item):
-                    logger.debug(f"Filtering anime: {item.get('name') or item.get('title')}")
-                    continue
-                filtered.append(item)
+            # Watched gating stays first; items without an IMDB id pass here and
+            # are dropped later during MetaPoster conversion (unchanged behavior).
+            if imdb_id in watched_set:
+                continue
+
+            if any(pred(item) for pred, label in active_filters):
+                continue
+            filtered.append(item)
 
         scored = []
         now_year = datetime.now().year
@@ -580,7 +644,6 @@ class RecommendationEngine:
             List of recommended items
         """
         logger.info(f"Generating recommendations (media_type={media_type})...")
-        cache_key = f"user:{self.config.stremio_auth_key}:recs:{media_type or 'all'}"
 
         # Resolve auth key (support username/password-backed configs)
         auth_key = await self.stremio.resolve_auth_key(self.config)
@@ -588,7 +651,9 @@ class RecommendationEngine:
             logger.warning("No valid Stremio auth key available; skipping recommendations")
             return []
         self.config.stremio_auth_key = auth_key
-        cache_key = f"user:{auth_key}:recs:{media_type or 'all'}"
+        # Fingerprint output-affecting config so toggling a filter takes effect
+        # immediately instead of being masked by a stale cache entry.
+        cache_key = f"user:{auth_key}:recs:{media_type or 'all'}:{self.config.cache_fingerprint()}"
 
         async def build_current() -> List[Dict[str, Any]]:
             return await self._build_recommendations(media_type, auth_key)
